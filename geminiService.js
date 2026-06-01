@@ -44,21 +44,59 @@ async function callGeminiAPI(apiKey, model, systemInstruction, prompt, history =
     }
   };
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(requestBody)
-  });
+  let retries = 3;
+  let delay = 1000; // 初始延遲 1 秒
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error?.message || "無法連接到 Gemini API");
+  while (true) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (e) {
+          throw new Error(`無法連接到 Gemini API (HTTP狀態碼: ${response.status})`);
+        }
+
+        const status = response.status;
+        const errMsg = errorData.error?.message || "無法連接到 Gemini API";
+
+        // 僅對伺服器故障 (>=500) 或臨時連線超時 (408) 進行指數退避重試
+        if ((status >= 500 || status === 408) && retries > 0) {
+          console.warn(`[Gemini API] 伺服器臨時錯誤 (${status})，剩餘重試次數: ${retries}，將於 ${delay}ms 後重試...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          retries--;
+          delay *= 2; // 指數級遞增延遲
+          continue;
+        }
+        
+        // 客戶端錯誤 (如 400 格式錯誤、403 金鑰錯誤、429 限流) 立即拋出，不進行無效重試
+        throw new Error(errMsg);
+      }
+
+      const data = await response.json();
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+    } catch (err) {
+      // 捕捉網絡故障（例如 DNS 解析失敗、斷網或被 CORS 阻擋導致的 TypeError）
+      const isNetworkError = err instanceof TypeError || err.message?.toLowerCase().includes("network") || err.message?.toLowerCase().includes("failed to fetch");
+      if (isNetworkError && retries > 0) {
+        console.warn(`[Gemini API] 網絡連線異常，剩餘重試次數: ${retries}，將於 ${delay}ms 後重試...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retries--;
+        delay *= 2;
+        continue;
+      }
+      throw err;
+    }
   }
-
-  const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
 /**
