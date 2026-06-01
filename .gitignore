@@ -1,0 +1,15 @@
+# macOS 系統檔案
+.DS_Store
+
+# Python 暫存檔案 (語法檢查工具產生)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 本地開發設定與金鑰備份 (防止金鑰外洩)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

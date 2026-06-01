@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-HK" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RehabCounselor AI - 香港復康會職業復康智能培訓平台</title>
+  
+  <!-- Premium Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons for Beautiful Visuals -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Design System Style Sheet -->
+  <link rel="stylesheet" href="index.css?v=20260531_v9">
+</head>
+<body>
+
+  <!-- Dynamic Floating Glass Blobs -->
+  <div class="bg-glowing-blob blob-purple"></div>
+  <div class="bg-glowing-blob blob-cyan"></div>
+
+  <!-- Main App Shell -->
+  <div class="app-container">
+    
+    <!-- Sidebar Navigation Drawer -->
+    <aside class="sidebar">
+      <div>
+        <!-- Logo -->
+        <div class="logo-section">
+          <div class="logo-icon">
+            <i class="fa-solid fa-graduation-cap"></i>
+          </div>
+          <div class="logo-text">
+            <h1>RehabCounselor</h1>
+            <p>復康培訓平台</p>
+          </div>
+        </div>
+
+        <!-- Navigation Drawer Links -->
+        <nav>
+          <ul class="nav-links">
+            <li>
+              <a class="nav-item active" data-target="dashboard">
+                <i class="fa-solid fa-gauge-high"></i> 儀表板 Dashboard
+              </a>
+            </li>
+            <li>
+              <a class="nav-item" data-target="theory">
+                <i class="fa-solid fa-book-open"></i> 理論學習 Hub
+              </a>
+            </li>
+            <li>
+              <a class="nav-item" data-target="arena">
+                <i class="fa-solid fa-user-ninja"></i> 個案實戰 Arena
+              </a>
+            </li>
+            <li>
+              <a class="nav-item" data-target="co-learning">
+                <i class="fa-solid fa-people-group"></i> 小組研討 Studio
+              </a>
+            </li>
+            <li>
+              <a class="nav-item" data-target="analytics">
+                <i class="fa-solid fa-chart-line"></i> 學習分析 Analytics
+              </a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+
+      <!-- Navigation Footer Panel -->
+      <div class="nav-footer">
+        <a class="nav-item" data-target="settings">
+          <i class="fa-solid fa-sliders"></i> 系統設定 Settings
+        </a>
+        <div class="user-widget">
+          <div class="avatar-badge">👨‍🏫</div>
+          <div class="user-info">
+            <p class="name">職業復康同工</p>
+            <p class="role">香港復康會中心</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Board Viewport -->
+    <main class="main-wrapper" id="main-content-viewport">
+      <!-- Top Utility bar -->
+      <div class="top-bar">
+        <div class="page-title">
+          <h2 id="view-title">加載中...</h2>
+          <p id="view-subtitle">請稍候...</p>
+        </div>
+        <div class="action-controls">
+          <!-- Locale Selector -->
+          <div class="locale-selector">
+            <button class="locale-btn active" data-locale="zh-HK">繁中</button>
+            <button class="locale-btn" data-locale="zh-CN">简中</button>
+            <button class="locale-btn" data-locale="en">EN</button>
+          </div>
+          <!-- Sound Toggle Button -->
+          <button class="sound-toggle-btn active" id="sound-toggle-btn" title="切換音效">
+            <i class="fa-solid fa-volume-high"></i>
+            <span class="sound-indicator"></span>
+          </button>
+          <button class="btn btn-circle" id="theme-toggle-btn" title="切換深淺色主題">
+            <i class="fa-solid fa-moon"></i>
+          </button>
+          <span class="tag tag-purple" id="api-status-badge">離線模式 (免金鑰)</span>
+        </div>
+      </div>
+
+      <!-- Content view mounts here dynamically -->
+      <div id="content-view-mount"></div>
+    </main>
+
+  </div>
+
+  <!-- Load Javascript App as ES Module -->
+  <script type="module" src="app.js?v=20260601_v10"></script>
+</body>
+</html>
