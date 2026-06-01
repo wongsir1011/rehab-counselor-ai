@@ -4,6 +4,58 @@
 
 ---
 
+## [v20260601_v12] - 2026-06-01T23:49:20+08:00 (香港時間 UTC+8)
+
+### 🔧 故障修復與安全防禦 (Fixed)
+#### 1. 歷史報告導出引擎 SSOT 數據污染與崩潰修復 (Historical Report Exporter Crash & Cross-Contamination Fix)
+*   **問題診斷**：在評審中發現，當同工點開「歷史面談卡片」喚起**全息全景詳細彈窗 (`showSessionDetailPopup`)** 並點擊「匯出報告」時，`exportSessionReport` 會強行讀取全域活動會話 `state.activeCase` 和 `state.activeSession` 的數據。
+*   **崩潰與交叉污染隱患**：若當前沒有處於活動對話中，系統會直接拋出 `TypeError` 崩潰；若當前正在進行其他個案的面談（如正與阿強對話，但匯出偉杰的歷史報告），將會產生嚴重的臨床數據污染——將當前對話內容、當前 SOAP 日誌錯誤地與歷史分數拼接導出，嚴重違反臨床系統 SSOT 與隱私原則。
+*   **安全重構**：重構了 `exportSessionReport(report, historicalSession = null)`。當傳入 `historicalSession` 歷史記錄實體時，所有的案主姓名、就業診斷、對白歷史與 SOAP/ICF 日誌皆優先從該實體中解析，安全解除了對全域活動狀態變數的強依賴，並同步更新了全息彈窗中的匯出按鈕事件。
+
+#### 2. 語音朗讀異步競爭與視覺發光剝奪修復 (Asynchronous Speech Synthesis visual-stripping race condition fix)
+*   **問題診斷**：在 Chrome 瀏覽器中，調用 `cancel()` 會延遲觸發舊語音的 `onerror`/`onend` 事件。當同工快速點擊重播或在對白切換時，舊語音的異步 `cleanup()` 回調會執行 `bubbleEl.classList.remove("is-speaking")`，從而將新啟動語音的氣泡發光外框無聲剥奪。
+*   **安全防禦**：將 `cleanup` 內的所有 bubble 與 avatar 樣式還原邏輯全部包裹在 `state.activeUtterance === utterance` 安全鎖內。只有當結束的語音確實是當前正在播放的活動語音時才允許進行樣式清理，徹底防範異步競爭。
+
+#### 3. 危險區域學習進度重設內存狀態復位 (Danger Zone Reset Progress State Alignment)
+*   **問題診斷**：點擊重設進度時，系統會正確調用 `localStorage.removeItem("rehab_selected_voice")` 清除語音首選項，但記憶體中的 `state.selectedVoiceName` 並未被清空，造成單次 session 的狀態脫節。
+*   **同步修復**：在重置事件監聽器中追加了 `state.selectedVoiceName = ""` 的記憶體狀態復位，使其與緩存層 100% 完美對齊。
+
+### 📦 變更檔案 (Files Changed)
+*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js):
+    *   重構 `exportSessionReport` 支持第二參數 `historicalSession` 與安全 Fallback 邏輯。
+    *   在 `showSessionDetailPopup` 的匯出點擊事件中精確傳入 `(session.report, session)`。
+    *   將 `speakCantonese` 的 `cleanup` 邏輯安全包裹在 `state.activeUtterance === utterance` 防護網內。
+    *   在設定頁面重設進度事件中補全 `state.selectedVoiceName = ""` 狀態復位。
+
+---
+
+## [v20260601_v11] - 2026-06-01T23:38:39+08:00 (香港時間 UTC+8)
+
+### 🚀 新增功能 (Added)
+#### 1. 臨床報告導出、案主語音情感調製與學習進度重置升級 (Phase 11 Operations Upgrades)
+*   **設定頁面「重設學習進度」自癒功能 (Danger Zone Reset Progress)**：
+    *   在設定頁面底端追加磨砂紅色「⚠️ 危險區域 (Danger Zone)」警告控制面板與重設按鈕。
+    *   實裝雙重防誤觸確認邏輯，防止用戶誤清除數據。
+    *   重設時觸發 `AudioSynth.playWarning()`（雙 Oscillator detune 鋸齒波低音警報），清除本地所有緩存（歷史評核、自定義個案、解鎖徽章），重置記憶體 `state`，彈出綠色發光自癒 Toast 提示並跳轉回 Dashboard 儀表板，完成完美的自癒閉環。
+*   **案用語音情感與抗拒程度調製 (Emotional Voice Synthesis)**：
+    *   重構 `speakCantonese()`，依據當前案主的 `emotional_state` 情感特徵進行 TTS 語速與語調動態調製。對於「焦慮/抗拒/憤怒」型案主（如阿強），拉高語速與語調（`rate = 1.15`, `pitch = 1.06`）模擬激動與焦慮；對於「沮喪/低落/無力」型案主，降低語速與語調（`rate = 0.90`, `pitch = 0.92`）模擬悲觀無力。
+*   **Web Audio 氣流嘆氣呼吸合成 (Breathing Acoustic Cues)**：
+    *   在 `AudioSynth` 中實裝 `playSigh()` 調製器，利用白噪音濾波與帶通 `BiquadFilter` 掃頻合成逼真的人類重呼吸嘆氣聲。
+    *   在語音朗讀前進行文本分析：若文案包含省略號 `……` 或 `...`（代表阻抗與猶豫），播放語音前自動觸發嘆氣音效，並延時 `280ms` 後自然銜接說話語音，帶來強大的臨床聽覺沉浸感。
+*   **臨床報告 Markdown 導出系統驗收 (Markdown Exporter Verified)**：
+    *   驗收了平台內置的 `exportSessionReport()` 導出引擎。支持在評估報告或歷史全息彈窗中一鍵導出為 Markdown (`.md`) 下載檔案，包含個案背景、SOAP 日誌、ICF 臨床評估及完整的諮商對白歷史紀錄。同工已成功下載並開啟驗證報告，功能運作完美。
+
+### 📦 變更檔案 (Files Changed)
+*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js):
+    *   在 `AudioSynth` 中實裝了 `playWarning()` 警告警報與 `playSigh()` 嘆氣合成器。
+    *   重構 `renderSettings()` 追加危險區域進度重設警告區塊與雙重安全鎖點擊監聽器，配合 `localStorage` 清理與自癒 Toast。
+    *   重構 `speakCantonese()` 引入基於案主情緒狀態的 rate/pitch 聲學調製，並增加省略號判斷觸發 `playSigh()` 嘆氣延時播放。
+    *   升級頂部模組導入參數為 `v20260601_v11`。
+*   [index.css](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.css): 追加 Phase 11 全套 CSS 樣式系統（`.btn-reset` 危險區按鈕及 Hover 霓虹流光）。
+*   [index.html](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.html): 升級應用程式與樣式表的快取破除參數至 `v20260601_v11`。
+
+---
+
 ## [v20260601_v10] - 2026-06-01T16:15:00+08:00 (香港時間 UTC+8)
 
 ### 🚀 模型升級與優化 (Model Upgrades)

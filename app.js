@@ -1,7 +1,7 @@
 // RehabCounselor AI - 主應用控制器 (Vanilla SPA Engine)
 
-import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260601_v10";
-import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260601_v10";
+import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260601_v11";
+import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260601_v11";
 
 // Global App State
 const state = {
@@ -147,6 +147,64 @@ const AudioSynth = {
       osc.stop(ctx.currentTime + 0.55);
     } catch (e) {
       console.warn("Web Audio unlock sound failed:", e);
+    }
+  },
+  playWarning() {
+    if (!state.soundEnabled) return;
+    try {
+      this.initContext();
+      const ctx = this.ctx;
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc1.type = "sawtooth";
+      osc2.type = "sawtooth";
+      osc1.frequency.setValueAtTime(150, ctx.currentTime);
+      osc2.frequency.setValueAtTime(153, ctx.currentTime); // detune effect
+      osc1.frequency.linearRampToValueAtTime(80, ctx.currentTime + 0.65);
+      osc2.frequency.linearRampToValueAtTime(82, ctx.currentTime + 0.65);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.65);
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(ctx.destination);
+      osc1.start();
+      osc2.start();
+      osc1.stop(ctx.currentTime + 0.65);
+      osc2.stop(ctx.currentTime + 0.65);
+    } catch (e) {
+      console.warn("Web Audio warning sound failed:", e);
+    }
+  },
+  playSigh() {
+    if (!state.soundEnabled) return;
+    try {
+      this.initContext();
+      const ctx = this.ctx;
+      const bufferSize = ctx.sampleRate * 0.35; // 0.35s sigh
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.setValueAtTime(350, ctx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(150, ctx.currentTime + 0.35);
+      filter.Q.setValueAtTime(1.0, ctx.currentTime);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 0.08); // fade in
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35); // fade out
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      noise.start();
+      noise.stop(ctx.currentTime + 0.35);
+    } catch (e) {
+      console.warn("Web Audio playSigh failed:", e);
     }
   }
 };
@@ -3227,11 +3285,34 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
     }
   }
 
-  utterance.rate = 1.05; // 稍快一點符合香港口語日常節奏
-  utterance.pitch = 1.0;
+  // 1. 基於案主性格與抗拒程度，動態調製 TTS 語調與語速 (Emotional Speech Modulation)
+  let rate = 1.05;
+  let pitch = 1.0;
+  
+  if (state.activeCase) {
+    const emotion = (state.activeCase.emotional_state || "").toLowerCase();
+    const isAnxious = emotion.includes("抗拒") || emotion.includes("焦慮") || emotion.includes("憤怒");
+    const isDepressed = emotion.includes("沮喪") || emotion.includes("低落") || emotion.includes("無力") || emotion.includes("悲觀");
+    
+    if (isAnxious) {
+      rate = 1.15; // 語速微快，模擬激動與焦慮不安
+      pitch = 1.06; // 語調微高
+    } else if (isDepressed) {
+      rate = 0.90; // 語速偏慢，模擬悲觀沮喪與心理阻礙
+      pitch = 0.92; // 語調偏低，營造低能量感
+    }
+  }
+  
+  utterance.rate = rate;
+  utterance.pitch = pitch;
+
+  // 立即標記當前活動語料，以確保在延時（嘆氣播放）期間能通過安全鎖檢查
+  state.activeUtterance = utterance;
 
   utterance.onstart = () => {
-    state.activeUtterance = utterance; // 標記當前活動語音，防範異步競態
+    if (state.activeUtterance !== utterance) {
+      return; // 被中途切換，終止高亮顯示
+    }
     if (bubbleEl) {
       bubbleEl.classList.add("is-speaking");
     }
@@ -3242,10 +3323,10 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
   };
 
   const cleanup = () => {
-    if (bubbleEl) {
-      bubbleEl.classList.remove("is-speaking");
-    }
     if (state.activeUtterance === utterance) {
+      if (bubbleEl) {
+        bubbleEl.classList.remove("is-speaking");
+      }
       const avatar = document.getElementById("rp-active-avatar");
       if (avatar) {
         avatar.classList.remove("speaking-pulse");
@@ -3256,6 +3337,21 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
 
   utterance.onend = cleanup;
   utterance.onerror = cleanup;
+
+  // 2. 語音前置聲學呼吸 (Breathing Acoustic Cue)
+  // 如果文本中包含 ellipses（…… 或 ...）代表案主正心生猶豫與阻抗，先觸發一個 350ms 的嘆氣音效
+  if (text.includes("…") || text.includes("...") || Math.random() < 0.3) {
+    AudioSynth.playSigh();
+    // 延時 280ms 播放語音，讓嘆氣呼吸聲與說話聲自然銜接
+    setTimeout(() => {
+      if (state.activeUtterance === utterance) {
+        if (typeof window !== "undefined" && window.speechSynthesis) {
+          window.speechSynthesis.speak(utterance);
+        }
+      }
+    }, 280);
+    return;
+  }
 
   if (typeof window !== "undefined" && window.speechSynthesis) {
     window.speechSynthesis.speak(utterance);
@@ -4849,7 +4945,7 @@ function showSessionDetailPopup(session) {
   // Export event listener
   overlay.querySelector("#popup-export-btn").addEventListener("click", () => {
     AudioSynth.playClick();
-    exportSessionReport(session.report);
+    exportSessionReport(session.report, session);
   });
 
   // Close event listeners
@@ -4930,6 +5026,19 @@ function renderSettings(container) {
           <button type="submit" class="btn btn-primary">儲存變更 Save</button>
         </div>
       </form>
+
+      <div style="border-top: 1px solid rgba(255,255,255,0.06); margin-top: 20px; padding-top: 20px;">
+        <h4 style="font-size:0.88rem; font-weight:800; color:var(--accent-red); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <i class="fa-solid fa-triangle-exclamation"></i> 危險區域 (Danger Zone)
+        </h4>
+        <div style="background:rgba(239,68,68,0.04); border:1px dashed rgba(239,68,68,0.25); border-radius:8px; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; gap:16px;">
+          <div style="flex:1;">
+            <p style="font-size:0.78rem; color:var(--text-bright); font-weight:700; margin-bottom:2px;">重設學習進度與數據</p>
+            <p style="font-size:0.72rem; color:var(--text-muted); line-height:1.4;">此操作將會清空你本地所有的對話歷史、臨床評核報告、自定義個案以及已解鎖的成就徽章。該操作不可撤銷，請謹慎操作。</p>
+          </div>
+          <button id="rp-reset-progress-btn" type="button" class="btn btn-reset" style="background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.4); color:#ef4444; font-weight:700; padding:6px 14px; border-radius:8px; cursor:pointer; font-size:0.75rem; white-space:nowrap; transition:all 0.25s ease;">重設進度 Reset</button>
+        </div>
+      </div>
     </div>
   `;
 
@@ -4960,6 +5069,67 @@ function renderSettings(container) {
     const dashLink = document.querySelector('.nav-item[data-target="dashboard"]');
     if (dashLink) dashLink.click();
   });
+
+  // Attach Settings Reset Progress Submit
+  const resetBtn = document.getElementById("rp-reset-progress-btn");
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      if (!confirm("⚠️ 同工，你確定要清除所有的學習進度嗎？\n此操作將會清除所有歷史對話報告、自定義個案與成就徽章，且不可還原！")) {
+        return;
+      }
+      if (!confirm("🔒 最後安全鎖確認：確定要執行重設並將所有進度歸零嗎？")) {
+        return;
+      }
+
+      // 1. Play warning sound
+      AudioSynth.playWarning();
+
+      // 2. Clear LocalStorage variables
+      localStorage.removeItem("rehab_sessions_history");
+      localStorage.removeItem("rehab_custom_cases");
+      localStorage.removeItem("rehab_unlocked_achievements");
+      localStorage.removeItem("rehab_completed_cases_count");
+      localStorage.removeItem("rehab_completed_case_ids");
+      localStorage.removeItem("rehab_selected_voice");
+      localStorage.removeItem("rehab_speech_muted");
+
+      // 3. Reset state properties to defaults
+      state.cases = [...MOCK_CASES];
+      state.unlockedAchievements = [];
+      state.completedCasesCount = 0;
+      state.completedCaseIds = [];
+      state.activeCase = null;
+      state.activeSession = null;
+      state.miGameScore = 0;
+      state.miGameIndex = 0;
+      state.isSpeechMuted = false;
+      state.selectedVoiceName = "";
+
+      // 4. Show success toast (re-uses existing styled toast element)
+      const toast = document.createElement("div");
+      toast.className = "achievement-toast show";
+      toast.innerHTML = `
+        <div class="toast-badge-icon" style="color: var(--accent-green); border-color: var(--accent-green);"><i class="fa-solid fa-circle-check"></i></div>
+        <div class="toast-content">
+          <div class="toast-title" style="color: var(--accent-green);">系統自癒成功</div>
+          <div class="toast-name">學習進度已重置</div>
+          <div class="toast-desc">所有的培訓數據、自定義個案與解鎖徽章已安全歸零。</div>
+        </div>
+      `;
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.remove(), 600);
+      }, 4000);
+
+      // 5. Update Badge UI
+      updateApiBadge();
+
+      // 6. Direct jump back to Dashboard
+      const dashLink = document.querySelector('.nav-item[data-target="dashboard"]');
+      if (dashLink) dashLink.click();
+    });
+  }
 }
 
 /* ==========================================================================
@@ -5172,16 +5342,22 @@ function initVoiceRecognition(inputEl) {
   };
 }
 
-function exportSessionReport(report) {
-  const caseName = state.activeCase.name;
-  const historyText = state.activeSession.history.map(h => `${h.role === "user" ? "輔導員" : "案主"}: ${h.text}`).join("\n");
-  const soapNotes = state.activeSession.notes.soap || "（未填寫 SOAP 記錄）";
-  const icfNotes = state.activeSession.notes.icf || "（未填寫 ICF 評估）";
+function exportSessionReport(report, historicalSession = null) {
+  const caseName = historicalSession ? historicalSession.caseName : (state.activeCase ? state.activeCase.name : "未知個案");
+  const historyData = historicalSession ? historicalSession.history : (state.activeSession ? state.activeSession.history : []);
+  const historyText = historyData.map(h => `${h.role === "user" ? "輔導員" : "案主"}: ${h.text}`).join("\n");
+  
+  const notesObj = historicalSession ? historicalSession.notes : (state.activeSession ? state.activeSession.notes : {});
+  const soapNotes = (notesObj && notesObj.soap) || "（未填寫 SOAP 記錄）";
+  const icfNotes = (notesObj && notesObj.icf) || "（未填寫 ICF 評估）";
+  
+  const diagnostic = historicalSession ? (historicalSession.caseDiagnostic || "未知診斷") : (state.activeCase ? state.activeCase.health_condition : "未知診斷");
+  const dateStr = historicalSession ? historicalSession.date : new Date().toLocaleString();
   
   const content = `# RehabCounselor AI - 復康輔導與督導評核報告\n\n` +
     `案主姓名：${caseName}\n` +
-    `就業診斷：${state.activeCase.health_condition}\n` +
-    `評估日期：${new Date().toLocaleString()}\n\n` +
+    `就業診斷：${diagnostic}\n` +
+    `評估日期：${dateStr}\n\n` +
     `## 📊 督導評估成績\n` +
     `- 同理心與反映式傾聽 (MI OARS)：${report.scores.empathy} 分\n` +
     `- 激發改變性談話 (MI Change Talk)：${report.scores.changeTalk} 分\n` +
@@ -5200,7 +5376,9 @@ function exportSessionReport(report) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `RehabCounselor_Report_${caseName}_${new Date().toISOString().slice(0, 10)}.md`;
+  
+  const cleanDate = dateStr.replace(/[\/\s:]/g, "-");
+  a.download = `RehabCounselor_Report_${caseName}_${cleanDate}.md`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

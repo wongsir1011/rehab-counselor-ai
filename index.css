@@ -3323,6 +3323,24 @@ body {
   }
 }
 
+/* ==========================================================================
+   Phase 11: Danger Zone Reset & Progress Operations Styling
+   ========================================================================== */
+.btn-reset {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.btn-reset:hover {
+  background: rgba(239, 68, 68, 0.25) !important;
+  border-color: rgba(239, 68, 68, 0.75) !important;
+  box-shadow: 0 0 16px rgba(239, 68, 68, 0.35) !important;
+  transform: translateY(-1.5px) !important;
+}
+
+.btn-reset:active {
+  transform: translateY(0.5px) !important;
+}
+
 
 
 
