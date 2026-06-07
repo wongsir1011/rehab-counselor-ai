@@ -49,7 +49,18 @@ const state = {
   locale: localStorage.getItem("rehab_locale") || "zh-HK",
   isSpeechMuted: localStorage.getItem("rehab_speech_muted") === "true",
   soundEnabled: localStorage.getItem("rehab_sound_enabled") !== "false",
-  speechUtteranceRefs: new Set()
+  speechUtteranceRefs: new Set(),
+  theoryProgress: (() => {
+    const local = localStorage.getItem("rehab_theory_progress");
+    if (local) {
+      try { return JSON.parse(local); } catch (e) {}
+    }
+    return {
+      act: { info: false, flashcards: false, test: false },
+      mi: { info: false, flashcards: false, test: false },
+      icf: { info: false, flashcards: false, test: false }
+    };
+  })()
 };
 
 // Web Audio API Synth Sound System
@@ -219,6 +230,10 @@ function t(key) {
     return TRANSLATIONS["zh-HK"][key];
   }
   return key;
+}
+
+function saveTheoryProgress() {
+  localStorage.setItem("rehab_theory_progress", JSON.stringify(state.theoryProgress));
 }
 
 function updateStaticUIStrings() {
@@ -443,11 +458,58 @@ function renderDashboard(container) {
     state.quoteIntervalId = null;
   }
 
+  // Calculate dynamic stats
+  let historySessions = [];
+  try {
+    historySessions = JSON.parse(localStorage.getItem("rehab_sessions_history")) || [];
+  } catch (e) {
+    historySessions = [];
+  }
+
+  let completedModules = 0;
+  if (state.theoryProgress) {
+    ['act', 'mi', 'icf'].forEach(tKey => {
+      if (state.theoryProgress[tKey]) {
+        if (state.theoryProgress[tKey].info) completedModules++;
+        if (state.theoryProgress[tKey].flashcards) completedModules++;
+        if (state.theoryProgress[tKey].test) completedModules++;
+      }
+    });
+  }
+  const progressPercent = Math.round((completedModules / 9) * 100);
+
+  const turnsCount = historySessions.reduce((acc, s) => acc + (s.history ? s.history.filter(h => h.role === 'user').length : 0), 0);
+  const turnsPercent = Math.min(100, Math.round(turnsCount / 50 * 100)); // Target 50 turns
+
+  let avgScore = 0;
+  let beatsPercent = 0;
+  if (historySessions.length > 0) {
+    const sum = historySessions.reduce((acc, s) => {
+      const avg = Math.round((s.report.scores.empathy + s.report.scores.changeTalk + s.report.scores.actFlexibility + s.report.scores.icfAccuracy + s.report.scores.actionPlanning) / 5);
+      return acc + avg;
+    }, 0);
+    avgScore = Math.round(sum / historySessions.length);
+    beatsPercent = Math.min(99, Math.round(avgScore * 1.1 - 5));
+    if (beatsPercent < 0) beatsPercent = 0;
+  }
+
+  const localizedProgressVal = t("dashboard_progress_val").replace("{completed}", completedModules);
+  const localizedHoursVal = t("dashboard_hours_val").replace("{turns}", turnsCount);
+  const localizedAccuracyVal = historySessions.length > 0
+    ? t("dashboard_accuracy_val").replace("{score}", avgScore)
+    : t("dashboard_accuracy_val_empty");
+
+  const categoryNameMap = {
+    act: "接納承諾療法 (ACT)",
+    mi: "動機式訪談法 (MI)",
+    icf: "全人復康矩陣 (ICF)"
+  };
+
   container.innerHTML = `
     <!-- Option A: 同工金句激勵牆 -->
     <div class="glass-card quote-carousel-container" style="margin-bottom: 24px; padding: 12px 20px; overflow: hidden; display: flex; align-items: center; gap: 12px;">
       <div style="background: rgba(124, 58, 237, 0.12); border: 1px solid rgba(124,58,237,0.3); color: #a78bfa; padding: 6px 12px; border-radius: 8px; font-weight: 700; font-size: 0.8rem; text-transform: uppercase; white-space: nowrap; display:flex; align-items:center; gap:6px;">
-        <i class="fa-solid fa-lightbulb"></i> 同工金句
+        <i class="fa-solid fa-lightbulb"></i> ${state.locale === "en" ? "Mantra" : "同工金句"}
       </div>
       <div class="quote-carousel-track" style="flex-grow: 1; overflow: hidden; position: relative; height: 24px; display:flex; align-items:center;">
         <div id="quote-carousel-text" style="color: var(--text-main); font-size: 0.88rem; font-weight: 500; font-style: italic; transition: opacity 0.5s ease-in-out; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; opacity: 1; width:100%;">
@@ -461,58 +523,58 @@ function renderDashboard(container) {
       <div class="glass-card metric-card" style="display:flex; align-items:center; padding:16px;">
         <div style="position: relative; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
           <svg width="50" height="50" viewBox="0 0 36 36" style="transform: rotate(-90deg);">
-            <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
-            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-purple)" stroke-width="3" stroke-dasharray="68, 100" stroke-linecap="round"/>
+            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--illustration-line-faint)" stroke-width="3"/>
+            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-purple)" stroke-width="3" stroke-dasharray="${progressPercent}, 100" stroke-linecap="round"/>
           </svg>
-          <span style="position: absolute; font-size: 0.72rem; font-weight: 800; color: var(--text-bright);">68%</span>
+          <span style="position: absolute; font-size: 0.72rem; font-weight: 800; color: var(--text-bright);">${progressPercent}%</span>
         </div>
         <div class="metric-info" style="margin-left: 14px;">
-          <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">理論學習進度</h4>
-          <p class="val" style="font-size: 1.15rem; color: var(--text-bright); font-weight:700;">已完成 4/6 章節</p>
+          <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">${t("dashboard_progress_title")}</h4>
+          <p class="val" style="font-size: 1.05rem; color: var(--text-bright); font-weight:700;">${localizedProgressVal}</p>
         </div>
       </div>
 
       <div class="glass-card metric-card" style="display:flex; align-items:center; padding:16px;">
         <div style="position: relative; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
           <svg width="50" height="50" viewBox="0 0 36 36" style="transform: rotate(-90deg);">
-            <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
-            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-cyan)" stroke-width="3" stroke-dasharray="45, 100" stroke-linecap="round"/>
+            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--illustration-line-faint)" stroke-width="3"/>
+            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-cyan)" stroke-width="3" stroke-dasharray="${turnsPercent}, 100" stroke-linecap="round"/>
           </svg>
-          <span style="position: absolute; font-size: 0.68rem; font-weight: 800; color: var(--text-bright);">4.5h</span>
+          <span style="position: absolute; font-size: 0.68rem; font-weight: 800; color: var(--text-bright);">${turnsCount}t</span>
         </div>
         <div class="metric-info" style="margin-left: 14px;">
-          <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">模擬對話時數</h4>
-          <p class="val" style="font-size: 1.15rem; color: var(--text-bright); font-weight:700;">目標 10 小時</p>
+          <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">${t("dashboard_hours_title")}</h4>
+          <p class="val" style="font-size: 1.05rem; color: var(--text-bright); font-weight:700;">${localizedHoursVal}</p>
         </div>
       </div>
 
       <div class="glass-card metric-card" style="display:flex; align-items:center; padding:16px;">
         <div style="position: relative; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
           <svg width="50" height="50" viewBox="0 0 36 36" style="transform: rotate(-90deg);">
-            <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
-            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-green)" stroke-width="3" stroke-dasharray="82, 100" stroke-linecap="round"/>
+            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--illustration-line-faint)" stroke-width="3"/>
+            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-green)" stroke-width="3" stroke-dasharray="${historySessions.length > 0 ? avgScore : 0}, 100" stroke-linecap="round"/>
           </svg>
-          <span style="position: absolute; font-size: 0.72rem; font-weight: 800; color: var(--text-bright);">82%</span>
+          <span style="position: absolute; font-size: 0.72rem; font-weight: 800; color: var(--text-bright);">${historySessions.length > 0 ? avgScore + '分' : '—'}</span>
         </div>
         <div class="metric-info" style="margin-left: 14px;">
-          <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">個案分析精準度</h4>
-          <p class="val" style="font-size: 1.15rem; color: var(--text-bright); font-weight:700;">擊敗 90% 同工</p>
+          <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">${t("dashboard_accuracy_title")}</h4>
+          <p class="val" style="font-size: 1.05rem; color: var(--text-bright); font-weight:700;">${localizedAccuracyVal}</p>
         </div>
       </div>
 
       <div class="glass-card metric-card" style="display:flex; align-items:center; padding:16px;">
         <div style="position: relative; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
           <svg width="50" height="50" viewBox="0 0 36 36" style="transform: rotate(-90deg);">
-            <circle cx="18" cy="18" r="16" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
+            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--illustration-line-faint)" stroke-width="3"/>
             <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-amber)" stroke-width="3" stroke-dasharray="100, 100" stroke-linecap="round"/>
           </svg>
           <span style="position: absolute; font-size: 0.75rem; font-weight: 800; color: var(--text-bright);">${state.cases.length}</span>
         </div>
         <div class="metric-info" style="margin-left: 14px; flex-grow:1; min-width:0;">
-          <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">已解鎖實戰個案</h4>
+          <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">${t("dashboard_cases_title")}</h4>
           <p class="val" style="font-size: 0.72rem; color: var(--text-main); display:flex; align-items:center; gap:5px; white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">
             API：<span class="pulse-indicator-dot" style="width: 7px; height: 7px; border-radius: 50%; background-color: ${state.apiKey ? 'var(--accent-green)' : 'var(--accent-purple)'}; box-shadow: 0 0 8px ${state.apiKey ? 'var(--accent-green)' : 'var(--accent-purple)'}; display: inline-block;"></span>
-            ${state.apiKey ? 'Gemini 智慧連線' : '免密碼本地連線'}
+            ${state.apiKey ? t("dashboard_cases_online") : t("dashboard_cases_offline")}
           </p>
         </div>
       </div>
@@ -525,27 +587,29 @@ function renderDashboard(container) {
         <!-- 本日星級推薦個案 -->
         <div class="glass-card" style="display: flex; flex-direction: column; gap: 16px;">
           <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-bright); display: flex; align-items: center; gap: 8px;">
-            <i class="fa-solid fa-star" style="color: var(--accent-amber);"></i> 本日星級推薦個案 (Star Case)
+            <i class="fa-solid fa-star" style="color: var(--accent-amber);"></i> ${t("star_case_title")}
           </h3>
-          <p style="color: var(--text-muted); font-size: 0.85rem;">系統根據你的表現，推薦今天挑戰：</p>
+          <p style="color: var(--text-muted); font-size: 0.85rem;">${t("star_case_desc")}</p>
           
           <div style="background: rgba(0,0,0,0.15); border-radius: 12px; padding: 20px; border: 1px solid var(--card-border); position:relative; overflow:hidden;">
             <!-- Subtle sci-fi grid overlay for Star Case -->
             <div style="position:absolute; top:0; left:0; right:0; bottom:0; background:radial-gradient(circle at top right, rgba(124,58,237,0.06), transparent); pointer-events:none;"></div>
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
-              <span class="tag tag-purple">情緒矛盾與焦慮處理</span>
+              <span class="tag tag-purple">${state.locale === "en" ? "Conflict & Anxiety Handling" : "情緒矛盾與焦慮處理"}</span>
               <span style="font-size: 0.78rem; color: var(--accent-amber); font-weight:700; display:flex; align-items:center; gap:3px;">
-                <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i> 中等難度
+                <i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i> ${state.locale === "en" ? "Medium" : "中等難度"}
               </span>
             </div>
             <h4 style="color: var(--text-bright); font-size:1.1rem; font-weight:800; margin-bottom: 8px; display:flex; align-items:center; gap:8px;">
-              <span style="font-size:1.3rem;">👨‍✈️</span> 阿強 (Ah Keung)
+              <span style="font-size:1.3rem;">👨‍✈️</span> ${state.locale === "en" ? "Ah Keung (Stroke Survivor)" : "阿強 (Ah Keung)"}
             </h4>
             <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 18px; line-height:1.5;">
-              中風小巴司機面對轉行，情緒焦慮並伴隨嚴重的自我殘廢化認知。適合演練 MI 矛盾處理與 ACT 價值澄清。
+              ${state.locale === "en" 
+                ? "Post-stroke minibus driver facing career transition, experiencing severe self-disability fusion. Practice MI OARS and ACT values clarification."
+                : "中風小巴司機面對轉行，情緒焦慮並伴隨嚴重的自我殘廢化認知。適合演練 MI 矛盾處理與 ACT 價值澄清。"}
             </p>
             <button class="btn btn-primary shimmer-btn" id="dash-start-case-btn" data-case="case_01" style="width:100%; justify-content:center;">
-              <i class="fa-solid fa-user-ninja"></i> 立即進入實戰艙
+              <i class="fa-solid fa-user-ninja"></i> ${state.locale === "en" ? "Enter Simulator Room" : "立即進入實戰艙"}
             </button>
           </div>
         </div>
@@ -554,73 +618,106 @@ function renderDashboard(container) {
         <div class="glass-card" style="display: flex; flex-direction: column; gap: 12px; position:relative; overflow:hidden;">
           <div style="position:absolute; top:-30%; right:-20%; width:120px; height:120px; border-radius:50%; background:var(--accent-purple); filter:blur(40px); opacity:0.18; pointer-events:none;"></div>
           <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-bright); display: flex; align-items: center; gap: 8px;">
-            <i class="fa-solid fa-gift" style="color: var(--accent-purple);"></i> 隨機實戰「盲盒」 (Daily Mystery Box)
+            <i class="fa-solid fa-gift" style="color: var(--accent-purple);"></i> ${t("mystery_box_title")}
           </h3>
           <p style="color: var(--text-muted); font-size: 0.82rem; line-height:1.5;">
-            時間有限？抽取一張隨機案主卡與當日情緒因子，直接啟動一場 5 分鐘高難度面談挑戰！
+            ${t("mystery_box_desc")}
           </p>
           
           <div id="mystery-box-trigger-area" style="cursor: pointer; background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(6, 182, 212, 0.1) 100%); border: 2px dashed rgba(124, 58, 237, 0.28); border-radius: 12px; padding: 20px; text-align: center; transition: var(--transition-smooth); margin-top:4px;">
             <div id="mystery-card-visual" style="font-size: 2.3rem; margin-bottom: 8px; filter: drop-shadow(0 0 10px rgba(124, 58, 237, 0.35)); transition: transform 0.6s cubic-bezier(0.4, 0, 0.2, 1); display:inline-block;">
               🔮
             </div>
-            <h4 id="mystery-card-title" style="color: var(--text-bright); font-size:0.9rem; font-weight:800;">點擊抽取神秘案主卡</h4>
-            <p id="mystery-card-subtitle" style="font-size: 0.72rem; color: var(--text-muted); margin-top:3px;">抽卡即刻啟動對話模擬</p>
+            <h4 id="mystery-card-title" style="color: var(--text-bright); font-size:0.9rem; font-weight:800;">${t("mystery_box_click")}</h4>
+            <p id="mystery-card-subtitle" style="font-size: 0.72rem; color: var(--text-muted); margin-top:3px;">${t("mystery_box_sub")}</p>
           </div>
         </div>
       </div>
 
-      <!-- Right Column (Option B Radar & Announcements) -->
+      <!-- Right Column (Option B Radar & Checklist) -->
       <div style="display: flex; flex-direction: column; gap: 24px; min-height:0;">
         <!-- Option B: 個人能力值雷達圖縮影 -->
         <div class="glass-card mini-radar-card" style="display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: center; min-height:0;">
           <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-bright); align-self: flex-start; display: flex; align-items: center; gap: 8px; width:100%;">
-            <i class="fa-solid fa-compass" style="color: var(--accent-cyan);"></i> 個人能力值縮影 (Competence Radar)
+            <i class="fa-solid fa-compass" style="color: var(--accent-cyan);"></i> ${t("mini_radar_title")}
           </h3>
           <p style="color: var(--text-muted); font-size: 0.82rem; align-self: flex-start;">
-            平台整合自學表現與 SOAP 評核的雷達圖：
+            ${t("mini_radar_desc")}
           </p>
           
           <svg width="150" height="150" viewBox="0 0 200 200" style="margin: 6px 0;">
-            <circle cx="100" cy="100" r="80" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>
-            <circle cx="100" cy="100" r="50" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>
-            <circle cx="100" cy="100" r="20" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>
+            <circle cx="100" cy="100" r="80" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1.5"/>
+            <circle cx="100" cy="100" r="50" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1.5"/>
+            <circle cx="100" cy="100" r="20" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1.5"/>
             
-            <line x1="100" y1="100" x2="100" y2="20" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-            <line x1="100" y1="100" x2="176" y2="76" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-            <line x1="100" y1="100" x2="147" y2="165" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-            <line x1="100" y1="100" x2="53" y2="165" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
-            <line x1="100" y1="100" x2="24" y2="76" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+            <line x1="100" y1="100" x2="100" y2="20" stroke="var(--illustration-line)" stroke-width="1"/>
+            <line x1="100" y1="100" x2="176" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
+            <line x1="100" y1="100" x2="147" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
+            <line x1="100" y1="100" x2="53" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
+            <line x1="100" y1="100" x2="24" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
             
             <!-- pre-computed visual polygon for mini radar -->
             <polygon points="100,50 160,82 135,140 70,140 45,82" fill="rgba(6, 182, 212, 0.2)" stroke="var(--accent-cyan)" stroke-width="2.5"/>
           </svg>
           
           <div style="display:flex; justify-content:space-between; width:100%; font-size:0.75rem; color:var(--text-muted); border-top: 1px solid var(--card-border); padding-top:10px;">
-            <span>💡 聽力共情：<strong>極佳 (A)</strong></span>
-            <span>⚡ 承諾行動引導：<strong>優良 (B+)</strong></span>
+            <span>💡 ${state.locale === "en" ? "Empathy" : "聽力共情"}：<strong>${state.locale === "en" ? "Excellent (A)" : "極佳 (A)"}</strong></span>
+            <span>⚡ ${state.locale === "en" ? "Commitment Action" : "承諾行動引導"}：<strong>${state.locale === "en" ? "Good (B+)" : "優良 (B+)"}</strong></span>
           </div>
         </div>
 
-        <!-- 機構培訓公告欄 -->
+        <!-- 真實自學與實戰進度清單 (Checklist) -->
         <div class="glass-card" style="display: flex; flex-direction: column; gap: 16px;">
           <h3 style="font-size: 1.15rem; font-weight: 800; color: var(--text-bright); display: flex; align-items: center; gap: 8px;">
-            <i class="fa-solid fa-bullhorn" style="color: var(--accent-cyan);"></i> 機構培訓公告
+            <i class="fa-solid fa-list-check" style="color: var(--accent-cyan);"></i> ${t("self_study_checklist_title")}
           </h3>
-          <ul style="list-style: none; display: flex; flex-direction: column; gap: 12px; font-size: 0.85rem;">
-            <li style="border-bottom: 1px solid var(--card-border); padding-bottom: 10px; display:flex; gap:10px; align-items:flex-start;">
-              <span class="tag tag-cyan" style="font-size:0.65rem; padding:2px 6px; flex-shrink:0;">🔥 工作坊</span>
-              <p style="color: var(--text-main); line-height:1.4;">6月15日將舉行「ICF 職業復康評估與政府津貼對接實務研討」，請各位同工預留時間。</p>
-            </li>
-            <li style="border-bottom: 1px solid var(--card-border); padding-bottom: 10px; display:flex; gap:10px; align-items:flex-start;">
-              <span class="tag tag-purple" style="font-size:0.65rem; padding:2px 6px; flex-shrink:0;">⚡ 自學提示</span>
-              <p style="color: var(--text-main); line-height:1.4;">新增自定義 AI 個案生成器，配置 Gemini API 金鑰後即可定制任何殘疾類型案例面談。</p>
-            </li>
-            <li style="display:flex; gap:10px; align-items:flex-start;">
-              <span class="tag tag-green" style="font-size:0.65rem; padding:2px 6px; flex-shrink:0;">🎉 新功能</span>
-              <p style="color: var(--text-main); line-height:1.4;">LIVE 廣東話對話窗支援固定高度與局部捲動，輔導指令發送條將永久置底，誠邀體驗！</p>
-            </li>
-          </ul>
+          <p style="color: var(--text-muted); font-size: 0.82rem; line-height: 1.4;">
+            ${t("self_study_checklist_desc")}
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- ACT -->
+            <div style="background: rgba(0,0,0,0.1); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span style="font-weight:700; font-size:0.85rem; color:var(--accent-purple);">${state.locale === "en" ? "Acceptance Commitment (ACT)" : "接納承諾療法 (ACT)"}</span>
+                <span class="tag tag-purple" style="font-size:0.68rem; padding:2px 6px;">
+                  ${state.theoryProgress.act.info && state.theoryProgress.act.flashcards && state.theoryProgress.act.test ? t("self_study_status_done") : t("self_study_status_todo")}
+                </span>
+              </div>
+              <div style="display:flex; gap:10px; font-size:0.75rem; color:var(--text-muted);">
+                <span><i class="fa-solid ${state.theoryProgress.act.info ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.act.info ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_info")}</span>
+                <span><i class="fa-solid ${state.theoryProgress.act.flashcards ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.act.flashcards ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_cards")}</span>
+                <span><i class="fa-solid ${state.theoryProgress.act.test ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.act.test ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_test")}</span>
+              </div>
+            </div>
+            <!-- MI -->
+            <div style="background: rgba(0,0,0,0.1); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span style="font-weight:700; font-size:0.85rem; color:var(--accent-amber);">${state.locale === "en" ? "Motivational Interviewing (MI)" : "動機式訪談法 (MI)"}</span>
+                <span class="tag tag-amber" style="font-size:0.68rem; padding:2px 6px;">
+                  ${state.theoryProgress.mi.info && state.theoryProgress.mi.flashcards && state.theoryProgress.mi.test ? t("self_study_status_done") : t("self_study_status_todo")}
+                </span>
+              </div>
+              <div style="display:flex; gap:10px; font-size:0.75rem; color:var(--text-muted);">
+                <span><i class="fa-solid ${state.theoryProgress.mi.info ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.mi.info ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_info")}</span>
+                <span><i class="fa-solid ${state.theoryProgress.mi.flashcards ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.mi.flashcards ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_cards")}</span>
+                <span><i class="fa-solid ${state.theoryProgress.mi.test ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.mi.test ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_test")}</span>
+              </div>
+            </div>
+            <!-- ICF -->
+            <div style="background: rgba(0,0,0,0.1); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span style="font-weight:700; font-size:0.85rem; color:var(--accent-cyan);">${state.locale === "en" ? "Functioning & Disability (ICF)" : "全人復康矩陣 (ICF)"}</span>
+                <span class="tag tag-cyan" style="font-size:0.68rem; padding:2px 6px;">
+                  ${state.theoryProgress.icf.info && state.theoryProgress.icf.flashcards && state.theoryProgress.icf.test ? t("self_study_status_done") : t("self_study_status_todo")}
+                </span>
+              </div>
+              <div style="display:flex; gap:10px; font-size:0.75rem; color:var(--text-muted);">
+                <span><i class="fa-solid ${state.theoryProgress.icf.info ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.icf.info ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_info")}</span>
+                <span><i class="fa-solid ${state.theoryProgress.icf.flashcards ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.icf.flashcards ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_cards")}</span>
+                <span><i class="fa-solid ${state.theoryProgress.icf.test ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.icf.test ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_test")}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -737,26 +834,38 @@ function triggerConfetti(x, y) {
    View 2: Theory Hub (ACT, MI, ICF) with Premium Sub-Tab Architecture
    ========================================================================== */
 function renderTheoryHub(container) {
+  // Track self-study progress
+  if (state.theoryProgress && state.theoryProgress[state.activeTheoryTab]) {
+    if (state.activeTheorySubTab === "info" || state.activeTheorySubTab === "flashcards") {
+      state.theoryProgress[state.activeTheoryTab][state.activeTheorySubTab] = true;
+      saveTheoryProgress();
+    }
+  }
+
+  const actLabel = state.locale === "en" ? "Acceptance & Commitment (ACT)" : state.locale === "zh-CN" ? "接纳承诺療法 (ACT)" : "接納承諾療法 (ACT)";
+  const miLabel = state.locale === "en" ? "Motivational Interviewing (MI)" : state.locale === "zh-CN" ? "动机式访谈法 (MI)" : "動機式訪談法 (MI)";
+  const icfLabel = state.locale === "en" ? "Functioning & Disability (ICF)" : state.locale === "zh-CN" ? "国际功能残疾分类 (ICF)" : "國際功能殘疾分類 (ICF)";
+
   container.innerHTML = `
     <!-- Main Theory Navigation Tabs -->
     <div class="glass-card" style="margin-bottom: 20px; padding: 12px;">
       <div class="notes-tab-group" style="border-radius: 10px;">
-        <div class="notes-tab ${state.activeTheoryTab === 'act' ? 'active' : ''}" id="tab-btn-act" style="font-size: 0.9rem; padding: 10px;">接納承諾療法 (ACT)</div>
-        <div class="notes-tab ${state.activeTheoryTab === 'mi' ? 'active' : ''}" id="tab-btn-mi" style="font-size: 0.9rem; padding: 10px;">動機式訪談法 (MI)</div>
-        <div class="notes-tab ${state.activeTheoryTab === 'icf' ? 'active' : ''}" id="tab-btn-icf" style="font-size: 0.9rem; padding: 10px;">國際功能殘疾分類 (ICF)</div>
+        <div class="notes-tab ${state.activeTheoryTab === 'act' ? 'active' : ''}" id="tab-btn-act" style="font-size: 0.9rem; padding: 10px;">${actLabel}</div>
+        <div class="notes-tab ${state.activeTheoryTab === 'mi' ? 'active' : ''}" id="tab-btn-mi" style="font-size: 0.9rem; padding: 10px;">${miLabel}</div>
+        <div class="notes-tab ${state.activeTheoryTab === 'icf' ? 'active' : ''}" id="tab-btn-icf" style="font-size: 0.9rem; padding: 10px;">${icfLabel}</div>
       </div>
     </div>
 
     <!-- Nested Premium Sub-Tabs -->
     <div class="theory-sub-tab-group">
       <div class="theory-sub-tab ${state.activeTheorySubTab === 'info' ? 'active' : ''}" id="sub-tab-info">
-        <i class="fa-solid fa-book-open"></i> 深度自學理論
+        <i class="fa-solid fa-book-open"></i> ${state.locale === "en" ? "Deep Theory Study" : state.locale === "zh-CN" ? "深度自学理论" : "深度自學理論"}
       </div>
       <div class="theory-sub-tab ${state.activeTheorySubTab === 'flashcards' ? 'active' : ''}" id="sub-tab-flashcards">
-        <i class="fa-solid fa-clone"></i> 3D 知識閃卡
+        <i class="fa-solid fa-clone"></i> ${state.locale === "en" ? "3D Flashcards" : state.locale === "zh-CN" ? "3D 知识闪卡" : "3D 知識閃卡"}
       </div>
       <div class="theory-sub-tab ${state.activeTheorySubTab === 'test' ? 'active' : ''}" id="sub-tab-test">
-        <i class="fa-solid fa-vial"></i> 實務鞏固測驗
+        <i class="fa-solid fa-vial"></i> ${state.locale === "en" ? "Practice Test" : state.locale === "zh-CN" ? "实务巩固测验" : "實務鞏固測驗"}
       </div>
     </div>
 
@@ -820,51 +929,95 @@ function renderACTTab(container) {
           <div class="hexaflex-center-text">心理彈性<br><span style="font-size:0.7rem; color:var(--accent-cyan); font-weight:600;">ACT Core</span></div>
           <svg width="340" height="340" viewBox="0 0 340 340">
             <!-- Background lines connecting the nodes -->
-            <polygon points="170,30 290,100 290,240 170,310 50,240 50,100" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>
-            <line x1="170" y1="30" x2="170" y2="310" stroke="rgba(255,255,255,0.08)" stroke-width="1.5" />
-            <line x1="50" y1="100" x2="290" y2="240" stroke="rgba(255,255,255,0.08)" stroke-width="1.5" />
-            <line x1="50" y1="240" x2="290" y2="100" stroke="rgba(255,255,255,0.08)" stroke-width="1.5" />
+            <polygon points="170,30 290,100 290,240 170,310 50,240 50,100" fill="none" stroke="var(--illustration-line)" stroke-width="2"/>
+            <line x1="170" y1="30" x2="170" y2="310" stroke="var(--illustration-line)" stroke-width="1.5" />
+            <line x1="50" y1="100" x2="290" y2="240" stroke="var(--illustration-line)" stroke-width="1.5" />
+            <line x1="50" y1="240" x2="290" y2="100" stroke="var(--illustration-line)" stroke-width="1.5" />
             
             <!-- Acceptance (Top) -->
             <g class="hexa-node ${state.activeHexaNode === 'acceptance' ? 'active' : ''}" data-node="acceptance" style="--glow-color: #ff6b6b">
-              <circle cx="170" cy="30" r="22" fill="#111827" stroke="#ff6b6b" stroke-width="2"/>
-              <text x="170" y="34" fill="white" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf004;</text>
+              <circle cx="170" cy="30" r="22" fill="var(--illustration-bg)" stroke="#ff6b6b" stroke-width="2"/>
+              <text x="170" y="34" fill="var(--text-bright)" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf004;</text>
             </g>
             
             <!-- Present Moment (Top Right) -->
             <g class="hexa-node ${state.activeHexaNode === 'present_moment' ? 'active' : ''}" data-node="present_moment" style="--glow-color: #51cf66">
-              <circle cx="290" cy="100" r="22" fill="#111827" stroke="#51cf66" stroke-width="2"/>
-              <text x="290" y="104" fill="white" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf14e;</text>
+              <circle cx="290" cy="100" r="22" fill="var(--illustration-bg)" stroke="#51cf66" stroke-width="2"/>
+              <text x="290" y="104" fill="var(--text-bright)" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf14e;</text>
             </g>
             
             <!-- Values (Bottom Right) -->
             <g class="hexa-node ${state.activeHexaNode === 'values' ? 'active' : ''}" data-node="values" style="--glow-color: #ae3ec9">
-              <circle cx="290" cy="240" r="22" fill="#111827" stroke="#ae3ec9" stroke-width="2"/>
-              <text x="290" y="244" fill="white" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf005;</text>
+              <circle cx="290" cy="240" r="22" fill="var(--illustration-bg)" stroke="#ae3ec9" stroke-width="2"/>
+              <text x="290" y="244" fill="var(--text-bright)" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf005;</text>
             </g>
             
             <!-- Committed Action (Bottom) -->
             <g class="hexa-node ${state.activeHexaNode === 'committed_action' ? 'active' : ''}" data-node="committed_action" style="--glow-color: #20c997">
-              <circle cx="170" cy="310" r="22" fill="#111827" stroke="#20c997" stroke-width="2"/>
-              <text x="170" y="314" fill="white" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf70c;</text>
+              <circle cx="170" cy="310" r="22" fill="var(--illustration-bg)" stroke="#20c997" stroke-width="2"/>
+              <text x="170" y="314" fill="var(--text-bright)" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf70c;</text>
             </g>
             
             <!-- Self as Context (Bottom Left) -->
             <g class="hexa-node ${state.activeHexaNode === 'self_as_context' ? 'active' : ''}" data-node="self_as_context" style="--glow-color: #fcc419">
-              <circle cx="50" cy="240" r="22" fill="#111827" stroke="#fcc419" stroke-width="2"/>
-              <text x="50" y="244" fill="white" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf2bd;</text>
+              <circle cx="50" cy="240" r="22" fill="var(--illustration-bg)" stroke="#fcc419" stroke-width="2"/>
+              <text x="50" y="244" fill="var(--text-bright)" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf2bd;</text>
             </g>
             
             <!-- Defusion (Top Left) -->
             <g class="hexa-node ${state.activeHexaNode === 'defusion' ? 'active' : ''}" data-node="defusion" style="--glow-color: #4dadf7">
-              <circle cx="50" cy="100" r="22" fill="#111827" stroke="#4dadf7" stroke-width="2"/>
-              <text x="50" y="104" fill="white" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf127;</text>
+              <circle cx="50" cy="100" r="22" fill="var(--illustration-bg)" stroke="#4dadf7" stroke-width="2"/>
+              <text x="50" y="104" fill="var(--text-bright)" font-family="FontAwesome" font-size="14" text-anchor="middle">&#xf127;</text>
             </g>
           </svg>
         </div>
 
         <!-- Right: Detailed Node Info Panel with Sliding Popover Style -->
         <div id="hexa-detail-mount"></div>
+      </div>
+
+      <!-- Detailed clinical framework explanation section -->
+      <div class="glass-card" style="margin-top: 20px; padding: 20px;">
+        <h4 style="color: var(--accent-purple); font-weight: 800; font-size: 1.05rem; margin-bottom: 8px;">
+          <i class="fa-solid fa-graduation-cap"></i> ${state.locale === "en" ? "ACT Clinical Application Framework: Three Pillars (Open, Aware, Active)" : "ACT 臨床應用深度解析：三大核心支柱 (Open, Aware, Active)"}
+        </h4>
+        <p style="font-size: 0.85rem; color: var(--text-main); line-height: 1.6; margin-bottom: 12px;">
+          ${state.locale === "en" 
+            ? "Acceptance & Commitment Therapy (ACT) works through the Hexaflex. These six processes are integrated into three key pillars to help clients build 'Psychological Flexibility':" 
+            : "接納承諾療法 (ACT) 透過六角形架構 (Hexaflex) 運作，這六大歷程並非獨立運作，而是互相交織，統合成三大核心支柱，協助面臨嚴重身體功能受損或創傷的案主重塑「心理彈性」："}
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 8px;">
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+            <h5 style="color: #ff6b6b; font-weight: 700; font-size: 0.88rem; margin-bottom: 4px;">
+              ${state.locale === "en" ? "1. Open - Acceptance & Defusion" : "1. 開放 (Open) - 接納與解離"}
+            </h5>
+            <p style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+              ${state.locale === "en"
+                ? "<b>Acceptance</b> and <b>Cognitive Defusion</b> form the 'Open' pillar. In vocational rehab, clients often fuse with self-defeating thoughts (e.g. 'I am useless after stroke'). Defusion helps them distance from these thoughts, creating space for choice."
+                : "<b>接納 (Acceptance)</b> 與 <b>認知解離 (Defusion)</b> 構成「開放」支柱。在職業復康中，案主常經歷「我跛左就係廢人」的認知融合，或試圖以不外出工作來逃避尷尬（經驗性逃避）。同工須引導案主容許痛楚或障礙想法存在，並與這些挫敗想法拉開距離，為下一步創造彈性空間。"}
+            </p>
+          </div>
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+            <h5 style="color: #fcc419; font-weight: 700; font-size: 0.88rem; margin-bottom: 4px;">
+              ${state.locale === "en" ? "2. Aware - Present Moment & Self-as-Context" : "2. 覺察 (Aware) - 關注當下與觀察自我"}
+            </h5>
+            <p style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+              ${state.locale === "en"
+                ? "<b>Present Moment Awareness</b> and <b>Self-as-Context</b> form the 'Aware' pillar. Clients often fixate on their past glory or dread the future. Bringing them back to the sensory here-and-now helps establish a wider perspective of the self beyond physical disability."
+                : "<b>關注當下 (Present Moment)</b> 與 <b>觀察自我 (Self as Context)</b> 構成「覺察」支柱。創傷案主常反覆回想「中風前的輝煌」，或災難化「未來的面試被笑」。同工須將案主拉回此時此刻的感官覺察，並建立一個更寬廣的觀察者平台，理解「我的身體有缺損，但我仍然是那個能容納所有經驗的完整生命」。"}
+            </p>
+          </div>
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+            <h5 style="color: #20c997; font-weight: 700; font-size: 0.88rem; margin-bottom: 4px;">
+              ${state.locale === "en" ? "3. Active - Values & Committed Action" : "3. 主動 (Active) - 價值觀與承諾行動"}
+            </h5>
+            <p style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+              ${state.locale === "en"
+                ? "<b>Values</b> and <b>Committed Action</b> form the 'Active' pillar. This is the ultimate goal of rehab. We clarify the client's values (e.g. responsibility for family) and translate them into tiny, gradual, committed steps, carrying their pain forward."
+                : "<b>價值觀 (Values)</b> 與 <b>承諾行動 (Committed Action)</b> 構成「主動」支柱。這是復康的終點。同工須協助案主澄清其深層的核心價值（如「對家庭的責任」），並將這些價值轉化為微小、漸進、可量化的行動計劃（如「下週去登記 ERB 體驗課程」），帶著殘疾或痛楚繼續前行。"}
+            </p>
+          </div>
+        </div>
       </div>
     `;
 
@@ -960,6 +1113,24 @@ function renderACTTab(container) {
         fused: "「痛到咁，我連企都企唔穩，根本無公司會請我，去面試都係獻醜。」",
         case: "雅婷 (38歲，慢性痛症媽媽)",
         hint: "案主將『痛楚』與『沒有公司會請我』這項主觀擔憂進行了融合。請引導她使用『我留意到大腦正浮現一個想法，話我...』，停止與痛楚爭辯，騰出心理空間。"
+      },
+      {
+        id: 3,
+        fused: "「我戴住助聽器去面試，人地一見到我個眼神就變左，我肯定佢地心裡笑緊我殘廢，我點講都無用。」",
+        case: "偉杰 (29歲，聽力損失青年)",
+        hint: "案主將『別人的眼神』與『笑我殘廢/點講都無用』的想法百分之百融合。請引導他改寫為：『我注意到我腦海裡浮現一個想法，話其他人笑緊我殘廢...』，拉開大腦想法與事實的差距。"
+      },
+      {
+        id: 4,
+        fused: "「我以前做開文職經理，依家叫我去庇護工場或者做包裝，真係好無面子，我不如匿喺屋企算。」",
+        case: "阿樂 (45歲，中度腦傷前經理)",
+        hint: "案主與『無面子』的標籤及『匿喺屋企算』的避開策略高度融合。引導他改寫為：『我留意到我腦頁正浮現一個想法，話去做包裝好無面子...』，接納尷尬並容許這想法存在，從而關關注重投社會的價值。"
+      },
+      {
+        id: 5,
+        fused: "「我個仔有自閉症，出去返工肯定會同同事吵架，佢遲早都會俾人開除，我地做乜要受呢份氣？」",
+        case: "家長 (自閉症青年偉明之母)",
+        hint: "家長將未發生的災難化想法（吵架、被開除）等同於現實。請引導家長改寫為：『我留意到我腦海中浮現一個對未來的擔心，話阿仔去返工會俾人開除...』，將恐懼客觀化，創造嘗試的彈性空間。"
       }
     ];
 
@@ -1043,6 +1214,12 @@ function renderACTTab(container) {
         // Confetti trigger
         const rect = e.target.getBoundingClientRect();
         triggerConfetti(rect.left + 50, rect.top + window.scrollY);
+
+        // Record progress
+        if (state.theoryProgress) {
+          state.theoryProgress.act.test = true;
+          saveTheoryProgress();
+        }
 
         fb.innerHTML = `
           <div class="defusion-feedback-badge">
@@ -1132,6 +1309,43 @@ function renderMITab(container) {
         <div style="background:rgba(245,158,11,0.05); border-left:4px solid var(--accent-amber); padding:16px; border-radius:8px; margin-top:8px;">
           <h4 style="color:var(--accent-amber); font-weight:800; font-size:0.95rem; margin-bottom:6px;"><i class="fa-solid fa-triangle-exclamation"></i> 避開「警報糾正反射 (Righting Reflex)」</h4>
           <p style="font-size:0.82rem; color:var(--text-main); line-height:1.5;">當我們看見案主有不良行為或消極心態時（例如不想去復康、不想找工作），專業人員的本能往往是**說教、給建議、甚至指責**（如：*『你唔去上堂，以後點搵工？』*）。MI 理論證實：這只會激發案主為「不改變」進行辯護，產生強烈「阻抗」，令諮商陷入僵局。OARS 的目的，就是透過**傾聽、反映、共情**來鬆動這份阻抗。</p>
+        </div>
+
+        <!-- Additional Deep Clinical Theory for MI -->
+        <div class="glass-card" style="margin-top: 20px; padding: 20px;">
+          <h4 style="color: var(--accent-amber); font-weight: 800; font-size: 1.05rem; margin-bottom: 8px;">
+            <i class="fa-solid fa-graduation-cap"></i> ${state.locale === "en" ? "MI Clinical Framework: Eliciting Change Talk & DARN-CAT Model" : "MI 臨床應用深度解析：引發改變談話與 DARN-CAT 模型"}
+          </h4>
+          <p style="font-size: 0.85rem; color: var(--text-main); line-height: 1.6; margin-bottom: 12px;">
+            ${state.locale === "en"
+              ? "Motivational Interviewing focuses on moving the client from resistance to change. The core technique is to notice, elicit, and reinforce 'Change Talk'. We use the DARN-CAT classification to evaluate the client's readiness:"
+              : "動機式訪談法 (MI) 的精髓在於引導案主從阻抗走向承諾。同工的核心任務是識別並引發案主的「改變談話 (Change Talk)」。臨床上可以使用 DARN-CAT 結構來評估案主改變的準備狀態："}
+          </p>
+          
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 8px;">
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+              <h5 style="color: var(--accent-amber); font-weight: 700; font-size: 0.88rem; margin-bottom: 6px;">
+                ${state.locale === "en" ? "DARN (Preparatory Change Talk)" : "DARN (準備性改變談話 - 蓄勢待發)"}
+              </h5>
+              <ul style="font-size: 0.78rem; color: var(--text-muted); padding-left: 14px; line-height: 1.5; margin: 0; list-style-type: disc;">
+                <li><b>Desire (願望)</b>: ${state.locale === "en" ? "'I want to find a stable job...'" : "「我想搵到一份穩定嘅工作...」"}</li>
+                <li><b>Ability (能力)</b>: ${state.locale === "en" ? "'I can use voice typing...'" : "「如果可以用廣東話語音輸入，我諗我都做到...」"}</li>
+                <li><b>Reasons (理由)</b>: ${state.locale === "en" ? "'I want to support my kids...'" : "「我想供仔女讀書，盡番老豆責任...」"}</li>
+                <li><b>Need (需要)</b>: ${state.locale === "en" ? "'I must leave the house...'" : "「我唔可以再匿喺房，我需要重投社會...」"}</li>
+              </ul>
+            </div>
+            
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+              <h5 style="color: var(--accent-green); font-weight: 700; font-size: 0.88rem; margin-bottom: 6px;">
+                ${state.locale === "en" ? "CAT (Mobilizing Change Talk)" : "CAT (行動性改變談話 - 跨步邁出)"}
+              </h5>
+              <ul style="font-size: 0.78rem; color: var(--text-muted); padding-left: 14px; line-height: 1.5; margin: 0; list-style-type: disc;">
+                <li><b>Commitment (承諾)</b>: ${state.locale === "en" ? "'I will register for the ERB course...'" : "「我下星期會去登記報讀 ERB 體驗課程...」"}</li>
+                <li><b>Activation (啟動)</b>: ${state.locale === "en" ? "'I am ready to fill out the form today...'" : "「我今日已經準備好填妥呢張就業評估表...」"}</li>
+                <li><b>Taking Steps (採取行動)</b>: ${state.locale === "en" ? "'I practiced speech input at home...'" : "「我尋日喺屋企試過用手機用語音打字，真係得...」"}</li>
+              </ul>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -1261,17 +1475,30 @@ function renderMITab(container) {
       // Unlock theory explorer achievement
       checkAndUnlockAchievements("theory_explorer");
 
+      // Record progress
+      if (state.theoryProgress) {
+        state.theoryProgress.mi.test = true;
+        saveTheoryProgress();
+      }
+
+      const completedTitle = state.locale === "en" ? "Congratulations on completing the MI OARS Matcher Challenge!" : state.locale === "zh-CN" ? "恭喜完成 MI OARS 实战配对挑战！" : "恭喜完成 MI OARS 實戰配對挑戰！";
+      const completedDesc = state.locale === "en" 
+        ? `You successfully answered all 10 classic client resistance statements, accumulating <strong style="color:var(--accent-green); font-size:1.2rem;">${state.miGameScore}</strong> points! This shows you have mastered the spirit of MI and overcome the righting reflex.`
+        : `你成功解答了所有 10 大經典案主的矛盾衝突陳述，累積獲得了 <strong style="color:var(--accent-green); font-size:1.2rem;">${state.miGameScore}</strong> 分！這代表你已基本掌握了如何在就業輔導中克服「警報糾正反射」，並促成改變性談話。`;
+      const btnRetry = state.locale === "en" ? "Retry Challenge" : "重新挑戰";
+      const btnBack = state.locale === "en" ? "Back to Study" : "回到自學理論";
+
       // Game completed, render reset
       container.innerHTML = `
         <div class="glass-card text-center" style="padding:48px 24px; text-align:center;">
           <div style="font-size:4rem; margin-bottom:16px;">🏆</div>
-          <h3 style="font-size:1.6rem; font-weight:800; color:var(--text-bright); margin-bottom:8px;">恭喜完成 MI OARS 實戰配對挑戰！</h3>
+          <h3 style="font-size:1.6rem; font-weight:800; color:var(--text-bright); margin-bottom:8px;">${completedTitle}</h3>
           <p style="color:var(--text-muted); max-width:520px; margin:0 auto 24px; line-height:1.5;">
-            你成功解答了所有 5 大經典案主的矛盾衝突陳述，累積獲得了 <strong style="color:var(--accent-green); font-size:1.2rem;">${state.miGameScore}</strong> 分！這代表你已基本掌握了如何在就業輔導中克服「警報糾正反射」，並促成改變性談話。
+            ${completedDesc}
           </p>
           <div style="display:flex; justify-content:center; gap:16px;">
-            <button class="btn btn-primary" id="reset-mi-game-btn"><i class="fa-solid fa-arrows-rotate"></i> 重新挑戰</button>
-            <button class="btn" id="mi-back-to-info-btn">回到自學理論</button>
+            <button class="btn btn-primary" id="reset-mi-game-btn"><i class="fa-solid fa-arrows-rotate"></i> ${btnRetry}</button>
+            <button class="btn" id="mi-back-to-info-btn">${btnBack}</button>
           </div>
         </div>
       `;
@@ -1430,6 +1657,40 @@ function renderICFTab(container) {
           </div>
         </div>
       </div>
+
+      <!-- Detailed clinical framework explanation section -->
+      <div class="glass-card" style="margin-top: 20px; padding: 20px;">
+        <h4 style="color: var(--accent-cyan); font-weight: 800; font-size: 1.05rem; margin-bottom: 8px;">
+          <i class="fa-solid fa-graduation-cap"></i> ${state.locale === "en" ? "ICF Biopsychosocial Framework in Vocational Rehabilitation" : "ICF 全人評估模型與職業復康臨床整合"}
+        </h4>
+        <p style="font-size: 0.85rem; color: var(--text-main); line-height: 1.6; margin-bottom: 12px;">
+          ${state.locale === "en"
+            ? "The WHO ICF (International Classification of Functioning, Disability and Health) shifts focus from 'disability as a disease' to 'functioning as a biopsychosocial dynamic'. In vocational counseling, it acts as a diagnostic bridge:"
+            : "世界衛生組織的 ICF (國際功能、殘疾和健康分類) 徹底改變了傳統醫學模式，不再將殘疾僅視為「個人的疾病」，而是視為「生理-心理-社會」之間的動態平衡。在職業輔導中，它是評估的核心骨架："}
+        </p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 8px;">
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+            <h5 style="color: var(--accent-cyan); font-weight: 700; font-size: 0.88rem; margin-bottom: 4px;">
+              ${state.locale === "en" ? "1. Bridging Capacity and Performance" : "1. 銜接「個人活動能力」與「社會參與表現」"}
+            </h5>
+            <p style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+              ${state.locale === "en"
+                ? "ICF distinguishes between <b>Capacity</b> (what a client can do in a standardized test room) and <b>Performance</b> (what they actually do in real life). If capacity is high but performance is low, environmental barriers (e.g. lack of ramp, employer bias) are likely the cause. Our job is to target and remove those barriers."
+                : "ICF 區分了<b>個人活動能力 (Capacity)</b>（如案主在標準治療室中單手可以打字）與<b>社會參與表現 (Performance)</b>（如案主在真實辦公室的表現）。若能力高而表現低，說明環境存在阻礙（如無障礙設施不足或僱主偏見），這正是復康同工需要攻堅的焦點。"}
+            </p>
+          </div>
+          <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+            <h5 style="color: var(--accent-amber); font-weight: 700; font-size: 0.88rem; margin-bottom: 4px;">
+              ${state.locale === "en" ? "2. Balancing Barriers and Facilitators" : "2. 評估「阻礙因子」與「促進因子」"}
+            </h5>
+            <p style="font-size: 0.78rem; color: var(--text-muted); line-height: 1.4;">
+              ${state.locale === "en"
+                ? "Environmental and personal factors can act as barriers or facilitators. E.g., a HK government subsidy of up to $40,000 for job accommodation is a major facilitator. Leveraging facilitators (e.g. assistive technology, ERB courses) helps bridge the deficit in body structures."
+                : "環境與個人因素兼具雙重屬性。例如，香港在職改裝資助最高4萬港元、復康巴士等即為強大的「環境促進因子」。同工在撰寫 SOAP 計劃時，應積極調配促進因子來代償案主身體功能（如中風偏癱、聽力受損）帶來的局限。"}
+            </p>
+          </div>
+        </div>
+      </div>
     `;
     
   } else if (state.activeTheorySubTab === "flashcards") {
@@ -1535,7 +1796,10 @@ function renderICFTab(container) {
     
   } else if (state.activeTheorySubTab === "test") {
     // Dynamic Drag-and-Drop Diagnostic Sandbox (SSOT Compliant)
-    const selectedCase = state.activeCase || state.cases[0]; // defaults to Ah Keung (case_01)
+    if (!state.icfSandboxCaseId) {
+      state.icfSandboxCaseId = (state.activeCase && state.activeCase.id) || state.cases[0].id;
+    }
+    const selectedCase = state.cases.find(c => c.id === state.icfSandboxCaseId) || state.cases[0];
     
     // Initialize stateful factors from single-source activeCase.icf_factors if not already populated
     if (!state.icfSandboxFactors || state.icfSandboxFactorsCaseId !== selectedCase.id) {
@@ -1558,12 +1822,20 @@ function renderICFTab(container) {
     container.innerHTML = `
       <div class="glass-card" style="display:flex; flex-direction:column; gap:20px;">
         <!-- Header & Case selection -->
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
           <div>
             <h3 style="font-size:1.25rem; font-weight:800; color:var(--text-bright); display:flex; align-items:center; gap:8px;">
               <i class="fa-solid fa-network-wired" style="color:var(--accent-cyan);"></i> ICF 職業復康診斷實戰沙盒 (Diagnostic Sandbox)
             </h3>
-            <p style="font-size:0.85rem; color:var(--text-muted); margin-top:2px;">當前模擬案主：<strong style="color:var(--text-bright);">${selectedCase.name}</strong> (${selectedCase.gender}性，${selectedCase.age}歲，${selectedCase.previous_job})</p>
+            <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+              <span style="font-size:0.85rem; color:var(--text-muted); font-weight:600;">選擇模擬案主：</span>
+              <select id="icf-case-selector" class="glass-select" style="background: rgba(0,0,0,0.3); border:1px solid var(--card-border); border-radius:6px; color:var(--text-bright); padding:4px 8px; font-size:0.82rem; cursor:pointer;">
+                ${state.cases.map(c => `
+                  <option value="${c.id}" ${c.id === selectedCase.id ? 'selected' : ''}>${c.name} (${c.gender}性，${c.age}歲，${state.locale === 'en' ? c.previous_job : (c.previous_job_zh || c.previous_job)})</option>
+                `).join("")}
+              </select>
+            </div>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">當前案主特徵：${selectedCase.gender}性，${selectedCase.age}歲，${state.locale === 'en' ? selectedCase.previous_job : (selectedCase.previous_job_zh || selectedCase.previous_job)}</p>
           </div>
           
           <div style="display:flex; align-items:center; gap:12px;">
@@ -1725,6 +1997,16 @@ function renderICFTab(container) {
       </div>
     `;
 
+    // Attach Case Selector Event
+    const caseSelector = document.getElementById("icf-case-selector");
+    if (caseSelector) {
+      caseSelector.addEventListener("change", (e) => {
+        state.icfSandboxCaseId = e.target.value;
+        state.icfSandboxFactors = null; // force reload factors
+        renderICFTab(container);
+      });
+    }
+
     // Attach Reset Event
     document.getElementById("reset-icf-sandbox-btn").addEventListener("click", () => {
       state.icfSandboxFactors = null;
@@ -1821,7 +2103,16 @@ function evaluateICFSandboxMatch(factorId, zoneType, zoneEl, container, clientX,
 
     // If sandbox completed, send high level AI supervision report
     if (state.icfSandboxFactors.every(f => f.mappedZone !== null)) {
-      state.icfSandboxStatus = "【大功告成！】恭喜同工完成阿強的全人 biopsychosocial 職業復康診斷！你已具備將 ICF 代碼整合並寫入 SOAP 輔導面談紀錄的卓越能力。";
+      const selectedCase = state.activeCase || state.cases[0];
+      if (state.theoryProgress) {
+        state.theoryProgress.icf.test = true;
+        saveTheoryProgress();
+      }
+      state.icfSandboxStatus = state.locale === "en"
+        ? `【Mission Accomplished!】 Congratulations on completing the biopsychosocial diagnosis for ${selectedCase.name}!`
+        : state.locale === "zh-CN"
+        ? `【大功告成！】恭喜同工完成${selectedCase.name}的全人 biopsychosocial 职业复康诊断！`
+        : `【大功告成！】恭喜同工完成${selectedCase.name}的全人 biopsychosocial 職業復康診斷！`;
     }
 
     renderICFTab(container);
@@ -1864,8 +2155,8 @@ function renderCaseArena(container) {
   container.innerHTML = `
     <!-- Top Selector Tabs -->
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:24px;">
-      <button class="btn btn-primary" id="view-cases-catalog-btn" style="justify-content:center; padding:14px;"><i class="fa-solid fa-folder-open"></i> 瀏覽經典復康個案庫 (Dossier Lobby)</button>
-      <button class="btn" id="view-case-generator-btn" style="justify-content:center; padding:14px;"><i class="fa-solid fa-wand-magic-sparkles"></i> AI 智能個案產生器 (Bio-Gen Pod)</button>
+      <button class="btn btn-primary" id="view-cases-catalog-btn" style="justify-content:center; padding:14px;"><i class="fa-solid fa-folder-open"></i> ${state.locale === "en" ? "Browse Case Catalog (Dossier Lobby)" : "瀏覽經典復康個案庫 (Dossier Lobby)"}</button>
+      <button class="btn" id="view-case-generator-btn" style="justify-content:center; padding:14px;"><i class="fa-solid fa-wand-magic-sparkles"></i> ${state.locale === "en" ? "AI Case Synthesizer (Bio-Gen Pod)" : "AI 智能個案產生器 (Bio-Gen Pod)"}</button>
     </div>
 
     <!-- Arena Mount Point -->
@@ -1908,11 +2199,11 @@ function renderCaseCatalog(container) {
       <div style="display:flex; gap:16px; align-items:center; width:100%; flex-wrap:wrap;">
         <div class="dossier-search-inner" style="flex-grow:1; min-width:280px;">
           <i class="fa-solid fa-magnifying-glass"></i>
-          <input type="text" class="dossier-search-input" id="dossier-search-box" placeholder="搜尋個案姓名、前職或疾病診斷特徵..." />
+          <input type="text" class="dossier-search-input" id="dossier-search-box" placeholder="${state.locale === 'en' ? 'Search case name, job, or condition...' : '搜尋個案姓名、前職或疾病診斷特徵...'}" />
         </div>
         
         <button class="cyber-filters-toggle" id="cyber-filters-toggle-btn">
-          <i class="fa-solid fa-sliders"></i> 高級基因篩選控制台 <i class="fa-solid fa-chevron-down" id="filters-chevron-icon" style="transition:transform 0.3s ease;"></i>
+          <i class="fa-solid fa-sliders"></i> ${state.locale === 'en' ? 'Advanced Filter Console' : '高級基因篩選控制台'} <i class="fa-solid fa-chevron-down" id="filters-chevron-icon" style="transition:transform 0.3s ease;"></i>
         </button>
       </div>
 
@@ -1921,33 +2212,33 @@ function renderCaseCatalog(container) {
         <div class="cyber-filter-row">
           <!-- 1. Age life stage -->
           <div class="cyber-filter-item">
-            <label><i class="fa-solid fa-calendar-day" style="color:var(--accent-cyan);"></i> 生命階段</label>
+            <label><i class="fa-solid fa-calendar-day" style="color:var(--accent-cyan);"></i> ${state.locale === 'en' ? 'Life Stage' : '生命階段'}</label>
             <select class="cyber-filter-select" id="filter-age-select">
-              <option value="all">全部年齡</option>
-              <option value="youth">青年待業期 (20-29 歲)</option>
-              <option value="middle">中年轉型期 (30-49 歲)</option>
-              <option value="elderly">高齡致殘期 (50 歲以上)</option>
+              <option value="all">${state.locale === 'en' ? 'All Ages' : '全部年齡'}</option>
+              <option value="youth">${state.locale === 'en' ? 'Youth (20-29 years old)' : '青年待業期 (20-29 歲)'}</option>
+              <option value="middle">${state.locale === 'en' ? 'Middle-aged Transition (30-49 years old)' : '中年轉型期 (30-49 歲)'}</option>
+              <option value="elderly">${state.locale === 'en' ? 'Senior (50+ years old)' : '高齡致殘期 (50 歲以上)'}</option>
             </select>
           </div>
 
           <!-- 2. Motivation Level -->
           <div class="cyber-filter-item">
-            <label><i class="fa-solid fa-gauge-simple-high" style="color:var(--accent-purple);"></i> 就業與內在動機</label>
+            <label><i class="fa-solid fa-gauge-simple-high" style="color:var(--accent-purple);"></i> ${state.locale === 'en' ? 'Work Motivation' : '就業與內在動機'}</label>
             <select class="cyber-filter-select" id="filter-motivation-select">
-              <option value="all">全部動機</option>
-              <option value="low">極低動機 (抗拒與逃避期)</option>
-              <option value="medium">中等動機 (糾結與矛盾期)</option>
-              <option value="good">良好動機 (準備與行動期)</option>
+              <option value="all">${state.locale === 'en' ? 'All Motivations' : '全部動機'}</option>
+              <option value="low">${state.locale === 'en' ? 'Low Motivation (Resistance)' : '極低動機 (抗拒與逃避期)'}</option>
+              <option value="medium">${state.locale === 'en' ? 'Medium Motivation (Ambivalence)' : '中等動機 (糾結與矛盾期)'}</option>
+              <option value="good">${state.locale === 'en' ? 'Good Motivation (Action)' : '良好動機 (準備與行動期)'}</option>
             </select>
           </div>
 
           <!-- 3. Case Origin -->
           <div class="cyber-filter-item">
-            <label><i class="fa-solid fa-circle-nodes" style="color:var(--accent-amber);"></i> 檔案來源</label>
+            <label><i class="fa-solid fa-circle-nodes" style="color:var(--accent-amber);"></i> ${state.locale === 'en' ? 'Case Source' : '檔案來源'}</label>
             <select class="cyber-filter-select" id="filter-origin-select">
-              <option value="all">全部來源</option>
-              <option value="prebuilt">官方經典案例</option>
-              <option value="custom">AI 智能合成案主</option>
+              <option value="all">${state.locale === 'en' ? 'All Sources' : '全部來源'}</option>
+              <option value="prebuilt">${state.locale === 'en' ? 'Official Cases' : '官方經典案例'}</option>
+              <option value="custom">${state.locale === 'en' ? 'AI Generated Cases' : 'AI 智能合成案主'}</option>
             </select>
           </div>
         </div>
@@ -1956,25 +2247,25 @@ function renderCaseCatalog(container) {
       <!-- Primary Category Pills -->
       <div class="dossier-filter-tabs" style="margin-top:8px;">
         <div class="dossier-filter-badge active" data-filter="all" style="--accent-color: var(--accent-purple); --accent-rgb: 124, 58, 237">
-          <i class="fa-solid fa-box-archive"></i> 全部個案
+          <i class="fa-solid fa-box-archive"></i> ${state.locale === 'en' ? 'All Cases' : '全部個案'}
         </div>
         <div class="dossier-filter-badge" data-filter="physical" style="--accent-color: var(--accent-green); --accent-rgb: 16, 185, 129">
-          <i class="fa-solid fa-wheelchair"></i> 肢體偏癱
+          <i class="fa-solid fa-wheelchair"></i> ${state.locale === 'en' ? 'Hemiplegia' : '肢體偏癱'}
         </div>
         <div class="dossier-filter-badge" data-filter="brain" style="--accent-color: var(--accent-rose); --accent-rgb: 244, 63, 94">
-          <i class="fa-solid fa-brain"></i> 腦部中風
+          <i class="fa-solid fa-brain"></i> ${state.locale === 'en' ? 'Stroke' : '腦部中風'}
         </div>
         <div class="dossier-filter-badge" data-filter="mental" style="--accent-color: var(--accent-purple); --accent-rgb: 124, 58, 237">
-          <i class="fa-solid fa-hand-holding-heart"></i> 精神康復
+          <i class="fa-solid fa-hand-holding-heart"></i> ${state.locale === 'en' ? 'Mental Health' : '精神康復'}
         </div>
         <div class="dossier-filter-badge" data-filter="asd" style="--accent-color: var(--accent-purple); --accent-rgb: 124, 58, 237">
-          <i class="fa-solid fa-child-reaching"></i> 自閉與發展
+          <i class="fa-solid fa-child-reaching"></i> ${state.locale === 'en' ? 'Autism & Dev' : '自閉與發展'}
         </div>
         <div class="dossier-filter-badge" data-filter="chronic" style="--accent-color: var(--accent-amber); --accent-rgb: 245, 158, 11">
-          <i class="fa-solid fa-kit-medical"></i> 慢性痛症
+          <i class="fa-solid fa-kit-medical"></i> ${state.locale === 'en' ? 'Chronic Pain' : '慢性痛症'}
         </div>
         <div class="dossier-filter-badge" data-filter="sensory" style="--accent-color: var(--accent-cyan); --accent-rgb: 6, 182, 212">
-          <i class="fa-solid fa-ear-deaf"></i> 感官聽障
+          <i class="fa-solid fa-ear-deaf"></i> ${state.locale === 'en' ? 'Sensory Hearing' : '感官聽障'}
         </div>
       </div>
     </div>
@@ -2427,11 +2718,11 @@ function renderCaseGenerator(container) {
                 <!-- Strand B (Purple) -->
                 <path class="dna-strand" d="M75,10 C50,40 50,60 75,90 C100,120 100,140 75,170 C50,200 50,220 75,250" stroke="var(--accent-purple)" style="animation-delay: -1s;" />
                 <!-- Connectors -->
-                <line x1="25" y1="20" x2="75" y2="20" stroke="rgba(255,255,255,0.08)" stroke-dasharray="2 2" />
-                <line x1="37" y1="50" x2="63" y2="50" stroke="rgba(255,255,255,0.08)" stroke-dasharray="2 2" />
-                <line x1="75" y1="90" x2="25" y2="90" stroke="rgba(255,255,255,0.08)" stroke-dasharray="2 2" />
-                <line x1="63" y1="130" x2="37" y2="130" stroke="rgba(255,255,255,0.08)" stroke-dasharray="2 2" />
-                <line x1="25" y1="170" x2="75" y2="170" stroke="rgba(255,255,255,0.08)" stroke-dasharray="2 2" />
+                <line x1="25" y1="20" x2="75" y2="20" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="37" y1="50" x2="63" y2="50" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="75" y1="90" x2="25" y2="90" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="63" y1="130" x2="37" y2="130" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="25" y1="170" x2="75" y2="170" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
               </g>
               <circle cx="25" cy="10" r="3.5" fill="var(--accent-cyan)" />
               <circle cx="75" cy="10" r="3.5" fill="var(--accent-purple)" />
@@ -2877,10 +3168,15 @@ function startRoleplaySession(selectedCase) {
         
         <!-- Live AI Coach Feedback Box -->
         <div class="glass-card" style="flex:1 1 0%; min-height:0; display:flex; flex-direction:column; gap:10px; overflow-y:auto; padding:16px;">
-          <div class="supervisor-badge">
-            <i class="fa-solid fa-user-tie"></i> AI 臨床督導助教 (Coach)
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div class="supervisor-badge">
+              <i class="fa-solid fa-user-tie"></i> AI 臨床督導助教 (Coach)
+            </div>
+            <button class="btn btn-primary" id="rp-show-coach-hint-btn" style="padding:4px 8px; font-size:0.7rem; display:flex; align-items:center; gap:4px; height:auto; background:var(--accent-purple);">
+              <i class="fa-solid fa-eye"></i> <span id="rp-show-coach-hint-btn-text">${state.locale === "en" ? "Show Supervisor Suggestion" : "顯示督導建議回應"}</span>
+            </button>
           </div>
-          <div id="rp-coach-feedback" style="font-size:0.82rem; color:var(--text-main); line-height:1.5;">
+          <div id="rp-coach-feedback" style="font-size:0.82rem; color:var(--text-main); line-height:1.5; display:none; background:rgba(0,0,0,0.15); padding:10px; border-radius:8px; border:1px dashed var(--card-border);">
             【會話初始提示】：案主${clientShortName}剛進來，擺出強烈的抗拒姿態。請不要立刻勸他去上堂，建議先使用 MI 的「同理反映」接納他的氣憤與無力感，與他建立工作同盟。
           </div>
         </div>
@@ -3082,6 +3378,26 @@ function startRoleplaySession(selectedCase) {
     });
   }
 
+  // Attach Show Coach Hint Event
+  const hintBtn = document.getElementById("rp-show-coach-hint-btn");
+  if (hintBtn) {
+    hintBtn.addEventListener("click", () => {
+      AudioSynth.playClick();
+      const fb = document.getElementById("rp-coach-feedback");
+      const icon = hintBtn.querySelector("i");
+      const text = document.getElementById("rp-show-coach-hint-btn-text");
+      if (fb.style.display === "none") {
+        fb.style.display = "block";
+        icon.className = "fa-solid fa-eye-slash";
+        text.textContent = state.locale === "en" ? "Hide Supervisor Suggestion" : "隱藏督導建議回應";
+      } else {
+        fb.style.display = "none";
+        icon.className = "fa-solid fa-eye";
+        text.textContent = state.locale === "en" ? "Show Supervisor Suggestion" : "顯示督導建議回應";
+      }
+    });
+  }
+
   // Speech Output Toggle (Phase 7)
   const speechToggleBtn = document.getElementById("rp-speech-toggle-btn");
   if (speechToggleBtn) {
@@ -3267,6 +3583,14 @@ async function submitMessageToAI(text) {
     const coachFeedback = document.getElementById("rp-coach-feedback");
     if (coachFeedback) {
       coachFeedback.innerHTML = coachHint.replace(/\n/g, "<br>");
+      coachFeedback.style.display = "none"; // Hide by default
+      const hintBtn = document.getElementById("rp-show-coach-hint-btn");
+      if (hintBtn) {
+        const icon = hintBtn.querySelector("i");
+        const text = document.getElementById("rp-show-coach-hint-btn-text");
+        if (icon) icon.className = "fa-solid fa-eye";
+        if (text) text.textContent = state.locale === "en" ? "Show Supervisor Suggestion" : "顯示督導建議回應";
+      }
     }
 
   } catch (error) {
@@ -3348,21 +3672,44 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
   }
   
   // 優先匹配同工自定義選擇的語音
-  if (state.selectedVoiceName) {
+  if (state.selectedVoiceName && state.selectedVoiceName !== "") {
     const matched = state.voices.find(v => v.name === state.selectedVoiceName);
     if (matched) utterance.voice = matched;
   } else {
-    // 強韌的廣東話 (Cantonese HK) 匹配演算法
-    const hkVoice = state.voices.find(v => 
+    // 強韌的廣東話 (Cantonese HK) 匹配與性別自適應演算法
+    const hkVoices = state.voices.filter(v => 
       v.lang === "zh-HK" || 
       v.lang === "zh-Hant-HK" || 
       v.lang.toLowerCase().replace(/_/g, "-").startsWith("zh-hk") ||
       v.name.toLowerCase().includes("hong kong") ||
       v.name.toLowerCase().includes("cantonese") ||
-      v.name.toLowerCase().includes("sin-ji") // Apple macOS 經典高品質廣東話 Sin-Ji 語音包
+      v.name.toLowerCase().includes("sin-ji")
     );
-    if (hkVoice) {
-      utterance.voice = hkVoice;
+    
+    if (hkVoices.length > 0) {
+      const isFemaleCase = state.activeCase && state.activeCase.gender === "女";
+      let selectedVoice = null;
+      
+      if (isFemaleCase) {
+        // 優先尋找女性聲音
+        const femaleKeywords = ["sin-ji", "tracy", "hiumaan", "ting-ting", "yu-ting", "female", "szemin"];
+        selectedVoice = hkVoices.find(v => 
+          femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
+        );
+      } else {
+        // 優先尋找男性聲音
+        const maleKeywords = ["danny", "wanlung", "limu", "male", "kangkang"];
+        selectedVoice = hkVoices.find(v => 
+          maleKeywords.some(kw => v.name.toLowerCase().includes(kw))
+        );
+      }
+      
+      // 如果沒有找到對應性別的聲音，則嘗試不帶性別匹配或者使用第一個廣東話語音
+      if (!selectedVoice) {
+        selectedVoice = hkVoices[0];
+      }
+      
+      utterance.voice = selectedVoice;
     } else {
       console.warn("您的裝置目前未偵測到廣東話 (zh-HK) 播放語音包，將使用瀏覽器預設語音。");
     }
@@ -3539,22 +3886,22 @@ function renderSessionReport(container, report) {
         <!-- Native SVG Radar Chart -->
         <svg width="240" height="240" viewBox="0 0 200 200" style="margin:12px 0;">
           <!-- Grid circles -->
-          <circle cx="100" cy="100" r="80" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-          <circle cx="100" cy="100" r="60" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-          <circle cx="100" cy="100" r="40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-          <circle cx="100" cy="100" r="20" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+          <circle cx="100" cy="100" r="80" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+          <circle cx="100" cy="100" r="60" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+          <circle cx="100" cy="100" r="40" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+          <circle cx="100" cy="100" r="20" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
           
           <!-- Axis lines -->
           <!-- 1. Empathy (0 deg - Top) -->
-          <line x1="100" y1="100" x2="100" y2="20" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="100" y2="20" stroke="var(--illustration-line)" stroke-width="1"/>
           <!-- 2. ChangeTalk (72 deg) -->
-          <line x1="100" y1="100" x2="176" y2="76" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="176" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
           <!-- 3. ACT (144 deg) -->
-          <line x1="100" y1="100" x2="147" y2="165" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="147" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
           <!-- 4. ICF (216 deg) -->
-          <line x1="100" y1="100" x2="53" y2="165" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="53" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
           <!-- 5. Action (288 deg) -->
-          <line x1="100" y1="100" x2="24" y2="76" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="24" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
           
           <!-- Axis Labels -->
           <text x="100" y="15" fill="var(--text-muted)" font-size="8" text-anchor="middle">同理心 (MI)</text>
@@ -4592,37 +4939,63 @@ function renderAnalytics(container) {
         </h3>
         
         <!-- Progress representation -->
-        <div style="display:flex; flex-direction:column; gap:16px; margin:16px 0;">
-          <div>
-            <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:4px;">
-              <span style="color:var(--text-muted); font-weight:600;">ACT ${state.locale === "en" ? "Acceptance & Commitment" : "接納承諾療法"}</span>
-              <span style="color:var(--text-bright); font-weight:700;">2.5 ${state.locale === "en" ? "hrs (Completed)" : "小時 (已達標)"}</span>
-            </div>
-            <div style="background:rgba(255,255,255,0.05); height:8px; border-radius:10px; overflow:hidden;">
-              <div style="background:var(--accent-purple); width:80%; height:100%; border-radius:10px;"></div>
-            </div>
-          </div>
+        ${(() => {
+          const actCompleted = (state.theoryProgress.act.info ? 1 : 0) + (state.theoryProgress.act.flashcards ? 1 : 0) + (state.theoryProgress.act.test ? 1 : 0);
+          const actPercent = Math.round((actCompleted / 3) * 100);
+          const miCompleted = (state.theoryProgress.mi.info ? 1 : 0) + (state.theoryProgress.mi.flashcards ? 1 : 0) + (state.theoryProgress.mi.test ? 1 : 0);
+          const miPercent = Math.round((miCompleted / 3) * 100);
+          const icfCompleted = (state.theoryProgress.icf.info ? 1 : 0) + (state.theoryProgress.icf.flashcards ? 1 : 0) + (state.theoryProgress.icf.test ? 1 : 0);
+          const icfPercent = Math.round((icfCompleted / 3) * 100);
 
-          <div>
-            <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:4px;">
-              <span style="color:var(--text-muted); font-weight:600;">MI ${state.locale === "en" ? "Motivational Interviewing" : "動機式訪談"}</span>
-              <span style="color:var(--text-bright); font-weight:700;">1.2 ${state.locale === "en" ? "hrs (Remaining 0.8h)" : "小時 (尚欠 0.8 小時)"}</span>
-            </div>
-            <div style="background:rgba(255,255,255,0.05); height:8px; border-radius:10px; overflow:hidden;">
-              <div style="background:var(--accent-amber); width:45%; height:100%; border-radius:10px;"></div>
-            </div>
-          </div>
+          return `
+            <div style="display:flex; flex-direction:column; gap:16px; margin:16px 0;">
+              <div>
+                <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:4px;">
+                  <span style="color:var(--text-muted); font-weight:600;">ACT ${state.locale === "en" ? "Acceptance & Commitment" : "接納承諾療法"}</span>
+                  <span style="color:var(--text-bright); font-weight:700;">${actPercent}% (${actCompleted}/3)</span>
+                </div>
+                <div style="background:rgba(255,255,255,0.05); height:8px; border-radius:10px; overflow:hidden; margin-bottom:6px;">
+                  <div style="background:var(--accent-purple); width:${actPercent}%; height:100%; border-radius:10px;"></div>
+                </div>
+                <div style="display:flex; gap:10px; font-size:0.7rem; color:var(--text-muted);">
+                  <span><i class="fa-solid ${state.theoryProgress.act.info ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.act.info ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_info")}</span>
+                  <span><i class="fa-solid ${state.theoryProgress.act.flashcards ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.act.flashcards ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_cards")}</span>
+                  <span><i class="fa-solid ${state.theoryProgress.act.test ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.act.test ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_test")}</span>
+                </div>
+              </div>
 
-          <div>
-            <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:4px;">
-              <span style="color:var(--text-muted); font-weight:600;">ICF ${state.locale === "en" ? "Full Matrix" : "全人復康矩陣"}</span>
-              <span style="color:var(--text-bright); font-weight:700;">0.8 ${state.locale === "en" ? "hrs (Remaining 1.2h)" : "小時 (尚欠 1.2 小時)"}</span>
+              <div>
+                <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:4px;">
+                  <span style="color:var(--text-muted); font-weight:600;">MI ${state.locale === "en" ? "Motivational Interviewing" : "動機式訪談"}</span>
+                  <span style="color:var(--text-bright); font-weight:700;">${miPercent}% (${miCompleted}/3)</span>
+                </div>
+                <div style="background:rgba(255,255,255,0.05); height:8px; border-radius:10px; overflow:hidden; margin-bottom:6px;">
+                  <div style="background:var(--accent-amber); width:${miPercent}%; height:100%; border-radius:10px;"></div>
+                </div>
+                <div style="display:flex; gap:10px; font-size:0.7rem; color:var(--text-muted);">
+                  <span><i class="fa-solid ${state.theoryProgress.mi.info ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.mi.info ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_info")}</span>
+                  <span><i class="fa-solid ${state.theoryProgress.mi.flashcards ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.mi.flashcards ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_cards")}</span>
+                  <span><i class="fa-solid ${state.theoryProgress.mi.test ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.mi.test ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_test")}</span>
+                </div>
+              </div>
+
+              <div>
+                <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:4px;">
+                  <span style="color:var(--text-muted); font-weight:600;">ICF ${state.locale === "en" ? "Full Matrix" : "全人復康矩陣"}</span>
+                  <span style="color:var(--text-bright); font-weight:700;">${icfPercent}% (${icfCompleted}/3)</span>
+                </div>
+                <div style="background:rgba(255,255,255,0.05); height:8px; border-radius:10px; overflow:hidden; margin-bottom:6px;">
+                  <div style="background:var(--accent-cyan); width:${icfPercent}%; height:100%; border-radius:10px;"></div>
+                </div>
+                <div style="display:flex; gap:10px; font-size:0.7rem; color:var(--text-muted);">
+                  <span><i class="fa-solid ${state.theoryProgress.icf.info ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.icf.info ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_info")}</span>
+                  <span><i class="fa-solid ${state.theoryProgress.icf.flashcards ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.icf.flashcards ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_cards")}</span>
+                  <span><i class="fa-solid ${state.theoryProgress.icf.test ? 'fa-circle-check' : 'fa-circle'}" style="color:${state.theoryProgress.icf.test ? 'var(--accent-green)' : 'var(--text-muted)'};"></i> ${t("self_study_item_test")}</span>
+                </div>
+              </div>
             </div>
-            <div style="background:rgba(255,255,255,0.05); height:8px; border-radius:10px; overflow:hidden;">
-              <div style="background:var(--accent-cyan); width:30%; height:100%; border-radius:10px;"></div>
-            </div>
-          </div>
-        </div>
+          `;
+        })()}
         
         <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.5; margin:0;">
           ${state.locale === "en" 
@@ -4642,17 +5015,17 @@ function renderAnalytics(container) {
         <!-- Dynamic Interactive SVG radar representation -->
         <svg width="220" height="220" viewBox="0 0 200 200" style="margin:4px 0; z-index:2;">
           <!-- Radar grid rings -->
-          <circle cx="100" cy="100" r="80" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-          <circle cx="100" cy="100" r="60" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-          <circle cx="100" cy="100" r="40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-          <circle cx="100" cy="100" r="20" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+          <circle cx="100" cy="100" r="80" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+          <circle cx="100" cy="100" r="60" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+          <circle cx="100" cy="100" r="40" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+          <circle cx="100" cy="100" r="20" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
           
           <!-- Radar axes -->
-          <line x1="100" y1="100" x2="100" y2="20" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-          <line x1="100" y1="100" x2="176" y2="76" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-          <line x1="100" y1="100" x2="147" y2="165" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-          <line x1="100" y1="100" x2="53" y2="165" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-          <line x1="100" y1="100" x2="24" y2="76" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="100" y2="20" stroke="var(--illustration-line)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="176" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="147" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="53" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
+          <line x1="100" y1="100" x2="24" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
           
           <!-- Dynamic Score Polygon -->
           <polygon id="radar-poly" points="${pointsStr}" fill="rgba(6, 182, 212, 0.25)" stroke="var(--accent-cyan)" stroke-width="2" style="transition: points 0.5s ease-out; filter: drop-shadow(0 0 6px rgba(6,182,212,0.15));"/>
@@ -4902,16 +5275,16 @@ function showSessionDetailPopup(session) {
                 ${state.locale === "en" ? "Competence Scores" : state.locale === "zh-CN" ? "本次面谈技巧评分" : "本次面談技巧評分"}
               </h4>
               <svg width="180" height="180" viewBox="0 0 200 200">
-                <circle cx="100" cy="100" r="80" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-                <circle cx="100" cy="100" r="60" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-                <circle cx="100" cy="100" r="40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
-                <circle cx="100" cy="100" r="20" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+                <circle cx="100" cy="100" r="80" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+                <circle cx="100" cy="100" r="60" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+                <circle cx="100" cy="100" r="40" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+                <circle cx="100" cy="100" r="20" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
                 
-                <line x1="100" y1="100" x2="100" y2="20" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-                <line x1="100" y1="100" x2="176" y2="76" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-                <line x1="100" y1="100" x2="147" y2="165" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-                <line x1="100" y1="100" x2="53" y2="165" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-                <line x1="100" y1="100" x2="24" y2="76" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                <line x1="100" y1="100" x2="100" y2="20" stroke="var(--illustration-line)" stroke-width="1"/>
+                <line x1="100" y1="100" x2="176" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
+                <line x1="100" y1="100" x2="147" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
+                <line x1="100" y1="100" x2="53" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
+                <line x1="100" y1="100" x2="24" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
                 
                 <!-- Axis Labels -->
                 <text x="100" y="15" fill="var(--text-muted)" font-size="8" text-anchor="middle">${state.locale === "en" ? "Empathy (MI)" : "同理反映"}</text>
@@ -5355,9 +5728,9 @@ function initVoiceRecognition(inputEl) {
   }
 
   const recognition = new SpeechRecognition();
-  recognition.continuous = false;
+  recognition.continuous = true;
   recognition.lang = state.recognitionLang;
-  recognition.interimResults = false;
+  recognition.interimResults = true;
   recognition.maxAlternatives = 1;
 
   state.recognition = recognition;
@@ -5380,7 +5753,7 @@ function initVoiceRecognition(inputEl) {
     state.isRecording = true;
     micBtn.classList.add("recording");
     waveHud.classList.add("active");
-    statusText.textContent = `🎙️ 正在聆聽中 (${state.recognitionLang})... 請用語音對話`;
+    statusText.textContent = `🎙️ 正在連續錄音中 (${state.recognitionLang})... 請說話，再次點擊麥克風以結束`;
     statusText.style.color = "var(--accent-green)";
     startVoiceFFT();
   };
@@ -5405,26 +5778,29 @@ function initVoiceRecognition(inputEl) {
   };
 
   recognition.onresult = (event) => {
-    const speechToText = event.results[0][0].transcript;
-    const confidence = event.results[0][0].confidence;
-    inputEl.value = speechToText;
+    let localFinal = "";
+    let interimTranscript = "";
+    for (let i = 0; i < event.results.length; ++i) {
+      const result = event.results[i];
+      if (result.isFinal) {
+        localFinal += result[0].transcript;
+      } else {
+        interimTranscript += result[0].transcript;
+      }
+    }
+    inputEl.value = localFinal + interimTranscript;
 
-    // 顯示識別結果與置信度，幫助用戶判斷是否被誤判語言
-    const confPercent = confidence ? `${Math.round(confidence * 100)}%` : '—';
-    statusText.textContent = `✅ 語音識別成功 (${state.recognitionLang}, 置信度: ${confPercent})`;
-    statusText.style.color = "var(--accent-cyan)";
+    // 顯示識別狀態
+    statusText.textContent = `🎙️ 正在錄音中... 再次點擊麥克風以停止`;
+    statusText.style.color = "var(--accent-green)";
 
     // 簡單啟發式檢測：如果結果中出現大量簡體字或普通話特徵詞，提示可能誤判
+    const speechToText = localFinal + interimTranscript;
     const simplifiedChars = /[这个么们来对说让还为没什从]/;
     if (simplifiedChars.test(speechToText) && state.recognitionLang !== 'zh-CN') {
       statusText.textContent = `⚠️ 辨識結果疑似為普通話，建議在設定中切換至 yue-Hant-HK 或使用無痕視窗`;
       statusText.style.color = "var(--accent-amber)";
     }
-
-    setTimeout(() => {
-      statusText.textContent = `點擊麥克風即可直接講話 (${state.recognitionLang})`;
-      statusText.style.color = "var(--text-muted)";
-    }, 3500);
   };
 }
 

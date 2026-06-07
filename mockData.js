@@ -246,6 +246,186 @@ export const MOCK_THEORY_DATA = {
             score: 1
           }
         ]
+      },
+      {
+        id: "q6",
+        statement: "「社工……我真係好怕面試……一去到大堂我就心跳到抖唔到氣，我係咪成世都只可以匿喺房打機，做個啃老族？」 (案主 阿樂)",
+        options: [
+          {
+            type: "open_question",
+            text: "「你提到一到大堂就會有強烈嘅生理反應，如果我哋同友好僱主傾，安排第一次面試用線上視像形式，你覺得會點？」",
+            feedback: "【優秀！開放式提問】提供線上視像面試的另一種環境適應選擇，繞開了現場社交的強烈焦慮。",
+            score: 10
+          },
+          {
+            type: "affirmation",
+            text: "「阿樂，雖然去面試令你感到極度恐慌同窒息，但你今日仍然勇敢行入黎我間房傾就業，呢份想自立嘅勇氣真係好難得。」",
+            feedback: "【出色！這是肯定】真誠肯定了案主對就業自立的渴望和踏出房門的勇氣。",
+            score: 10
+          },
+          {
+            type: "reflective_listening",
+            text: "「看見面試大堂就勾起你強烈嘅生理恐懼，這讓你感到極之無奈同自責，甚至擔心自己永遠都行唔出呢一步。」",
+            feedback: "【極佳！反映性傾聽】精準共情了自閉症青年面對大堂壓力時的窒息感與對未來的深度絕望。",
+            score: 10
+          },
+          {
+            type: "summary",
+            text: "「你一方面好渴望為爸爸媽媽分擔、證明自己有自立能力；但另一方面，面試大堂嘅巨大社交壓力又令你身體本能地想逃跑，這讓你感到十分掙扎。」",
+            feedback: "【非常好！總結】清晰提煉出案主「渴望分擔/證明自己」與「社交恐懼/本能逃避」的雙重矛盾面。",
+            score: 10
+          },
+          {
+            type: "advice",
+            text: "「阿樂，你大個仔啦，唔可以成日諗住打機逃避。心跳加快只係心理作用，你深呼吸，夾硬行入去面試，試多幾次就習慣啦！」",
+            feedback: "【不推薦：說教與忽視障礙】這忽視了 ASD 伴隨社交焦慮的真實感官與生理過載，強加指令只會讓案主更想躲回房間。",
+            score: 1
+          }
+        ]
+      },
+      {
+        id: "q7",
+        statement: "「醫生都話我呢個痛係斷唔到尾，我唔明點解你哋仲要逼我去學網店營運，你哋係咪想我痛死？」 (案主 雅婷)",
+        options: [
+          {
+            type: "reflective_listening",
+            text: "「你覺得醫生宣判左斷唔到尾之後，轉職學電腦對你黎講好似係一個完全無可能、而且會加劇身體痛苦嘅無理要求，令你覺得好委屈同憤怒。」",
+            feedback: "【極佳！反映性傾聽】精準同理了慢性痛症案主對於「被迫轉職」所產生的委屈與恐懼感，安全降溫情緒。",
+            score: 10
+          },
+          {
+            type: "open_question",
+            text: "「網店營運聽落確實好陌生。如果我哋保證，上堂時你可以隨時躺下、伸展，而且每日只上兩小時，你覺得這對你的痛楚管理會有咩幫助？」",
+            feedback: "【優秀！開放式提問】引入合理便利的環境調適手段，引導案主思考帶著痛楚學習的可行性。",
+            score: 10
+          },
+          {
+            type: "affirmation",
+            text: "「雖然每日都面對火燒咁嘅劇痛，且對新課程充滿懷疑，但你依然願意黎到中心向我表達你嘅不滿，這證明你其實一直沒有放棄尋找生活出路。」",
+            feedback: "【優秀！肯定】將案主的憤怒和投訴重塑為「積極尋求溝通與出路」的動力，肯定其韌性。",
+            score: 10
+          },
+          {
+            type: "summary",
+            text: "「聽你講，你一方面好擔心長時間坐著上課會令你的肌痛惡化，但另一方面，醫生所講嘅『無法斷尾』，又令你對任何就業嘗試都感到極度無助和懷疑。」",
+            feedback: "【非常好！總結】提煉了案主「對痛楚加劇的恐懼」與「對疾病無法根治的絕望」兩大阻礙層面。",
+            score: 10
+          },
+          {
+            type: "advice",
+            text: "「雅婷，我哋點會逼你呢？網店營運係最舒服嘅文職啦，你食定止痛藥堅持去上堂啦，有錢交租先至最緊要啊。」",
+            feedback: "【不推薦：忽視痛苦與過早建議】這強加了生存壓力並忽視其真實痛楚，極易激發強烈阻抗。",
+            score: 2
+          }
+        ]
+      },
+      {
+        id: "q8",
+        statement: "「我以前做小巴司機，手握方向盤幾有威嚴，依家要我坐喺度做打字送信嘅文職，我仲成個男人樣咩？簡直係無尊嚴！」 (案主 阿強)",
+        options: [
+          {
+            type: "reflective_listening",
+            text: "「你習慣了開小巴時自主、掌控一切嘅威嚴感，現在要轉做文職助手，這落差令你覺得自己好窩囊，尊嚴受損。」",
+            feedback: "【極佳！反映性傾聽】深刻切入中年男性失去「掌控感」與「尊嚴」的心理落差，共情深度極佳。",
+            score: 10
+          },
+          {
+            type: "open_question",
+            text: "「以前嘅威嚴感對你確實好重要。如果拋開職位高低，你覺得在辦公室中做一個支援團隊、用另一種方式支持屋企嘅爸爸，會點樣實踐你作為男人的責任？」",
+            feedback: "【優秀！開放式提問】運用 ACT 價值澄清，將「男人尊嚴」從「開小巴」引導至「承擔與支持家庭」的核心價值。",
+            score: 10
+          },
+          {
+            type: "affirmation",
+            text: "「開小巴開左三十年，你一直都係屋企嘅頂天立地嘅支柱。即使依家身體變左，你呢份想靠自己賺錢養家嘅骨氣，依然非常有尊嚴。」",
+            feedback: "【優秀！肯定】真誠肯定其骨氣，重建其自我認同，減少自我廢人化。",
+            score: 10
+          },
+          {
+            type: "summary",
+            text: "「你一方面好懷念以前手握方向盤、作為家庭唯一支柱嘅自豪感；但另一方面，轉做基層文職嘅巨大落差，又令你覺得好似失去左作為男人的價值。」",
+            feedback: "【非常好！總結】清晰呈現了案主「以往司機掌控感」與「轉做文職失去價值感」之間的內在張力。",
+            score: 10
+          },
+          {
+            type: "advice",
+            text: "「阿強，職業無分貴賤啦，文職都係自力更生，你唔好咁愛面子啦，有工返總好過做廢人啦！」",
+            feedback: "【不推薦：說教與標籤化】這帶有貶義標籤且以道德說教壓制案主，會極大地傷害案主的自尊，引發強烈對抗。",
+            score: 1
+          }
+        ]
+      },
+      {
+        id: "q9",
+        statement: "「電話聯絡我我又聽唔清楚，要求公司改用 WhatsApp 佢哋實覺得我麻煩。呢個世界根本就無所謂嘅『合理便利』，都係呃人嘅！」 (案主 偉杰)",
+        options: [
+          {
+            type: "reflective_listening",
+            text: "「你嘗試過求職但因為聽不清電話而被拒絕，這令你對僱主嘅態度感到非常失望，覺得提出合理要求只會招來嫌棄。」",
+            feedback: "【極佳！反映性傾聽】同理了聽障案主在電話招聘中遭受的社交挫敗，以及對勞工市場的防備與不信任。",
+            score: 10
+          },
+          {
+            type: "open_question",
+            text: "「過往嘅電話面試確實帶比你好多打擊。如果我們中心直接幫你對接友好設計公司，在求職信中備註『因聽力便利要求以 WhatsApp/文字進行首輪面試』，你覺得這會如何改變你的面試體驗？」",
+            feedback: "【優秀！開放式提問】提出具體的環境促成因素（友好配對），引導其思考在保護隱私和便利下的新面試體驗。",
+            score: 10
+          },
+          {
+            type: "affirmation",
+            text: "「面對多次電話聯絡不暢順嘅挫折，你依然願意同我坦白表達你對呢個就業市場嘅質疑，這證明你其實仍然渴望找到一個公平發揮才華嘅舞台。」",
+            feedback: "【優秀！肯定】將質疑重塑為「對公平發揮才華的熱望」，真誠肯定其求職意志。",
+            score: 10
+          },
+          {
+            type: "summary",
+            text: "「聽你講，你一方面好渴望能夠像專業設計師那樣被聘請，但另一方面，以往因為電話溝通不良所受嘅傷害，又令你覺得僱主根本不會為你做出任何調整。」",
+            feedback: "【非常好！總結】梳理了「專業認可的渴望」與「對無障礙調整的悲觀質疑」雙重心理。",
+            score: 10
+          },
+          {
+            type: "advice",
+            text: "「偉杰，你唔可以咁偏激啊，政府好多宣傳合理便利㗎。你下次面試前，直接同人哋講你戴助聽器，叫人哋大聲啲咪得囉！」",
+            feedback: "【不推薦：說教與無效安慰】小看了聽力障礙的真實困難，且說教味重，會使案主關閉溝通大門。",
+            score: 1
+          }
+        ]
+      },
+      {
+        id: "q10",
+        statement: "「上次斷手指之後，我發夢都夢到部機器壓落黎。你哋叫我去工廠面試，根本就係送我入地獄！」 (工傷創傷案主)",
+        options: [
+          {
+            type: "reflective_listening",
+            text: "「上次工傷嘅恐怖畫面至今仍然深深刻喺你腦海入面，一提到工廠面試，你就感覺像要重新經歷那次斷指嘅劇痛同絕望。」",
+            feedback: "【極佳！反映性傾聽】深度同理了工傷創傷後壓力症（PTSD）案主的恐懼與身體創傷記憶，展現出極強的臨床同理心。",
+            score: 10
+          },
+          {
+            type: "open_question",
+            text: "「創傷確實帶比你極大嘅痛苦。如果我們承諾，所有求職方向都完全避開工業機器，轉向包裝、零售或文職，你覺得這對你重建安全感會有咩幫助？」",
+            feedback: "【優秀！開放式提問】在安全網下引導其思考轉行（活動與參與的重組），避開創傷源，實踐自立價值。",
+            score: 10
+          },
+          {
+            type: "affirmation",
+            text: "「面對如此可怕嘅創傷陰影，每次閉上眼都經歷恐懼，你今日依然願意黎中心尋求協助，你嘅堅韌同對生活嘅骨氣真係好強大。」",
+            feedback: "【優秀！肯定】真誠肯定其克服 PTSD 症狀前來諮商的巨大勇氣與生命抗逆力。",
+            score: 10
+          },
+          {
+            type: "summary",
+            text: "「一方面，你內在非常渴望能夠重新自立，擺對依賴社福的狀態；但另一方面，上次工傷留下嘅強烈身體恐懼，又令你一見到工廠大門就感到生命受威脅。」",
+            feedback: "【非常好！總結】清晰指出案主「尊嚴自立」與「創傷性生存恐懼」之間的巨大靈魂張力。",
+            score: 10
+          },
+          {
+            type: "advice",
+            text: "「工傷已經過去啦，你唔好總係自己嚇自己啦。你面試時閉上眼睛，唔好睇部機器，去試下啦，克服恐懼先可以重返社會啊！」",
+            feedback: "【不推薦：說教與二次傷害】這是否定與強加說教，忽視創傷生理反應，極易對案主造成二次心理傷害並破壞諮商關係。",
+            score: 1
+          }
+        ]
       }
     ]
   },
@@ -554,11 +734,12 @@ export const TRANSLATIONS = {
     "dashboard_welcome": "歡迎回來，復康輔導同工",
     "dashboard_subtitle": "今天想提升哪項專業技巧？選擇自學或進入模擬個案演練。",
     "dashboard_progress_title": "理論學習進度",
-    "dashboard_progress_val": "已完成 4/6 章節",
-    "dashboard_hours_title": "模擬對話時數",
-    "dashboard_hours_val": "目標 10 小時",
-    "dashboard_accuracy_title": "個案分析精準度",
-    "dashboard_accuracy_val": "擊敗 90% 同工",
+    "dashboard_progress_val": "已完成 {completed}/9 個模組",
+    "dashboard_hours_title": "實戰對話輪次",
+    "dashboard_hours_val": "互動 {turns} 輪",
+    "dashboard_accuracy_title": "分析平均得分",
+    "dashboard_accuracy_val": "平均 {score} 分",
+    "dashboard_accuracy_val_empty": "尚未評估 (N/A)",
     "dashboard_cases_title": "已解鎖實戰個案",
     "dashboard_cases_online": "Gemini 智慧連線",
     "dashboard_cases_offline": "免密碼本地連線",
@@ -579,7 +760,14 @@ export const TRANSLATIONS = {
     "synthesis_subtitle": "配置底層神經參數，利用 Google Gemini 智慧核心，在 8 秒內注入香港社會環境變量，合成一份全套 ICF 矩陣與地道廣東話抗拒心理台詞的實戰個案。",
     "synthesize_case_btn": "啟動生命特徵合成艙 (Begin Synthesis)",
     "system_settings_title": "平台全局設定",
-    "system_settings_subtitle": "配置 Gemini API 金鑰、微調廣東話語音輸出，實現最佳體驗。"
+    "system_settings_subtitle": "配置 Gemini API 金鑰、微調廣東話語音輸出，實現最佳體驗。",
+    "self_study_checklist_title": "真實自學與實戰進度清單",
+    "self_study_checklist_desc": "本機免密碼獨立運行，實時記錄你的通關歷程：",
+    "self_study_item_info": "理論自學",
+    "self_study_item_cards": "知識閃卡",
+    "self_study_item_test": "實踐測驗",
+    "self_study_status_done": "已達標",
+    "self_study_status_todo": "未完成"
   },
   "zh-CN": {
     "dashboard": "仪表板 Dashboard",
@@ -591,11 +779,12 @@ export const TRANSLATIONS = {
     "dashboard_welcome": "欢迎回来，复康辅导同工",
     "dashboard_subtitle": "今天想提升哪项专业技巧？选择自学或进入模拟个案演练。",
     "dashboard_progress_title": "理论学习进度",
-    "dashboard_progress_val": "已完成 4/6 章节",
-    "dashboard_hours_title": "模拟对话时数",
-    "dashboard_hours_val": "目标 10 小时",
-    "dashboard_accuracy_title": "个案分析精准度",
-    "dashboard_accuracy_val": "击败 90% 同工",
+    "dashboard_progress_val": "已完成 {completed}/9 个模组",
+    "dashboard_hours_title": "实战对话轮次",
+    "dashboard_hours_val": "互动 {turns} 轮",
+    "dashboard_accuracy_title": "分析平均得分",
+    "dashboard_accuracy_val": "平均 {score} 分",
+    "dashboard_accuracy_val_empty": "尚未评估 (N/A)",
     "dashboard_cases_title": "已解锁实战个案",
     "dashboard_cases_online": "Gemini 智慧连线",
     "dashboard_cases_offline": "免密码本地连线",
@@ -616,7 +805,14 @@ export const TRANSLATIONS = {
     "synthesis_subtitle": "配置底层神经参数，利用 Google Gemini 智慧核心，在 8 秒内注入香港社会环境变量，合成一份全套 ICF 矩阵与地道广东话抗拒心理台词的实战个案。",
     "synthesize_case_btn": "启动生命特征合成舱 (Begin Synthesis)",
     "system_settings_title": "平台全局设定",
-    "system_settings_subtitle": "配置 Gemini API 金钥、微调广东话语音输出，实现最佳体验。"
+    "system_settings_subtitle": "配置 Gemini API 金钥、微调广东话语音输出，实现最佳体验。",
+    "self_study_checklist_title": "真实自学与实战进度清单",
+    "self_study_checklist_desc": "本机免密码独立运行，实时记录你的通关历程：",
+    "self_study_item_info": "理论自学",
+    "self_study_item_cards": "知识闪卡",
+    "self_study_item_test": "实践测验",
+    "self_study_status_done": "已达标",
+    "self_study_status_todo": "未完成"
   },
   "en": {
     "dashboard": "Dashboard",
@@ -628,11 +824,12 @@ export const TRANSLATIONS = {
     "dashboard_welcome": "Welcome back, Vocational Rehab Counselor",
     "dashboard_subtitle": "What professional skills would you like to improve today? Select self-study or enter simulations.",
     "dashboard_progress_title": "Theory Progression",
-    "dashboard_progress_val": "4/6 chapters completed",
-    "dashboard_hours_title": "Dialogue Hours",
-    "dashboard_hours_val": "Target 10 Hours",
-    "dashboard_accuracy_title": "Case Analysis Accuracy",
-    "dashboard_accuracy_val": "Beats 90% of peers",
+    "dashboard_progress_val": "Completed {completed}/9 Modules",
+    "dashboard_hours_title": "Dialogue Turns",
+    "dashboard_hours_val": "{turns} Turns Interacted",
+    "dashboard_accuracy_title": "Avg Assessment Score",
+    "dashboard_accuracy_val": "Average {score} pts",
+    "dashboard_accuracy_val_empty": "Not Assessed (N/A)",
     "dashboard_cases_title": "Unlocked Cases",
     "dashboard_cases_online": "Gemini Active Connection",
     "dashboard_cases_offline": "Local Offline Fallback",
@@ -653,7 +850,14 @@ export const TRANSLATIONS = {
     "synthesis_subtitle": "Configure neural properties, inject HK social factors, and synthesize a complete ICF case with Cantonese resistant dialogues using Gemini in 8 seconds.",
     "synthesize_case_btn": "Launch Bio-Gen Synthesis Console",
     "system_settings_title": "Global System Settings",
-    "system_settings_subtitle": "Configure Gemini API credentials and customize Cantonese TTS voice outputs."
+    "system_settings_subtitle": "Configure Gemini API credentials and customize Cantonese TTS voice outputs.",
+    "self_study_checklist_title": "Real-Time Self-Study Progress Checklist",
+    "self_study_checklist_desc": "Running locally without credentials. Real-time checklist of your progression:",
+    "self_study_item_info": "Theory Study",
+    "self_study_item_cards": "Study Cards",
+    "self_study_item_test": "Quiz Test",
+    "self_study_status_done": "Passed",
+    "self_study_status_todo": "Pending"
   }
 };
 
