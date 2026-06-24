@@ -35,6 +35,13 @@
   --shadow-neon: 0 0 15px rgba(124, 58, 237, 0.25);
   --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   --sidebar-width: 260px;
+
+  /* Nested container background variables for theme compatibility */
+  --nested-bg-faint: rgba(255, 255, 255, 0.02);
+  --nested-bg-light: rgba(255, 255, 255, 0.04);
+  --nested-bg-medium: rgba(0, 0, 0, 0.15);
+  --nested-bg-dark: rgba(0, 0, 0, 0.22);
+  --nested-bg-darkest: rgba(0, 0, 0, 0.3);
 }
 
 [data-theme="light"] {
@@ -58,6 +65,25 @@
   --accent-cyan-glow: rgba(8, 145, 178, 0.15);
   --shadow-premium: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
   --shadow-neon: 0 0 15px rgba(109, 40, 217, 0.1);
+
+  /* Nested container background variables for light mode theme compatibility */
+  --nested-bg-faint: rgba(0, 0, 0, 0.015);
+  --nested-bg-light: rgba(0, 0, 0, 0.03);
+  --nested-bg-medium: rgba(0, 0, 0, 0.05);
+  --nested-bg-dark: rgba(0, 0, 0, 0.08);
+  --nested-bg-darkest: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] .form-group input, 
+[data-theme="light"] .form-group select {
+  background: rgba(255, 255, 255, 0.85) !important;
+  color: var(--text-bright) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+[data-theme="light"] .form-group input:focus, 
+[data-theme="light"] .form-group select:focus {
+  background: #ffffff !important;
+  border-color: var(--accent-purple) !important;
 }
 
 /* Reset and Core Styles */

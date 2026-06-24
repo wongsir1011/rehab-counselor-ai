@@ -9,6 +9,7 @@ const state = {
   theme: "dark",
   apiKey: localStorage.getItem("rehab_gemini_api_key") || "",
   selectedModel: localStorage.getItem("rehab_selected_model") || "gemini-2.5-flash",
+  userName: localStorage.getItem("rehab_user_name") || "",
   cases: (() => {
     const localCustom = localStorage.getItem("rehab_custom_cases");
     if (localCustom) {
@@ -261,7 +262,14 @@ function updateStaticUIStrings() {
 
   const namePara = document.querySelector(".user-info .name");
   const rolePara = document.querySelector(".user-info .role");
-  if (namePara) namePara.textContent = state.locale === "en" ? "Vocational Rehab Staff" : "職業復康同工";
+  if (namePara) {
+    const baseName = state.locale === "en" ? "Vocational Rehab Staff" : "職業復康同工";
+    if (state.userName) {
+      namePara.textContent = `${baseName} (${state.userName})`;
+    } else {
+      namePara.textContent = baseName;
+    }
+  }
   if (rolePara) rolePara.textContent = state.locale === "en" ? "HKSR Centre" : "香港復康會中心";
 
   updateApiBadge();
@@ -591,7 +599,7 @@ function renderDashboard(container) {
           </h3>
           <p style="color: var(--text-muted); font-size: 0.85rem;">${t("star_case_desc")}</p>
           
-          <div style="background: rgba(0,0,0,0.15); border-radius: 12px; padding: 20px; border: 1px solid var(--card-border); position:relative; overflow:hidden;">
+          <div style="background: var(--nested-bg-medium); border-radius: 12px; padding: 20px; border: 1px solid var(--card-border); position:relative; overflow:hidden;">
             <!-- Subtle sci-fi grid overlay for Star Case -->
             <div style="position:absolute; top:0; left:0; right:0; bottom:0; background:radial-gradient(circle at top right, rgba(124,58,237,0.06), transparent); pointer-events:none;"></div>
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
@@ -676,7 +684,7 @@ function renderDashboard(container) {
           </p>
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <!-- ACT -->
-            <div style="background: rgba(0,0,0,0.1); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
+            <div style="background: var(--nested-bg-light); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <span style="font-weight:700; font-size:0.85rem; color:var(--accent-purple);">${state.locale === "en" ? "Acceptance Commitment (ACT)" : "接納承諾療法 (ACT)"}</span>
                 <span class="tag tag-purple" style="font-size:0.68rem; padding:2px 6px;">
@@ -690,7 +698,7 @@ function renderDashboard(container) {
               </div>
             </div>
             <!-- MI -->
-            <div style="background: rgba(0,0,0,0.1); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
+            <div style="background: var(--nested-bg-light); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <span style="font-weight:700; font-size:0.85rem; color:var(--accent-amber);">${state.locale === "en" ? "Motivational Interviewing (MI)" : "動機式訪談法 (MI)"}</span>
                 <span class="tag tag-amber" style="font-size:0.68rem; padding:2px 6px;">
@@ -704,7 +712,7 @@ function renderDashboard(container) {
               </div>
             </div>
             <!-- ICF -->
-            <div style="background: rgba(0,0,0,0.1); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
+            <div style="background: var(--nested-bg-light); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <span style="font-weight:700; font-size:0.85rem; color:var(--accent-cyan);">${state.locale === "en" ? "Functioning & Disability (ICF)" : "全人復康矩陣 (ICF)"}</span>
                 <span class="tag tag-cyan" style="font-size:0.68rem; padding:2px 6px;">
@@ -1158,7 +1166,7 @@ function renderACTTab(container) {
               <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600;"><i class="fa-solid fa-user"></i> 案主：${challenge.case}</span>
             </div>
             <p style="font-size:1.05rem; font-style:italic; font-weight:700; color:var(--text-bright); margin:12px 0;">"${challenge.fused}"</p>
-            <div style="background:rgba(0,0,0,0.15); border-radius:8px; padding:10px; border:1px dashed rgba(244,63,94,0.3);">
+            <div style="background:var(--nested-bg-medium); border-radius:8px; padding:10px; border:1px dashed rgba(244,63,94,0.3);">
               <h5 style="color:var(--accent-cyan); font-size:0.8rem; font-weight:700; margin-bottom:4px;"><i class="fa-solid fa-lightbulb"></i> 督導戰術提示：</h5>
               <p style="font-size:0.78rem; color:var(--text-muted); line-height:1.4;">${challenge.hint}</p>
             </div>
@@ -1633,10 +1641,10 @@ function renderICFTab(container) {
         <h3 style="font-size:1.25rem; font-weight:800; color:var(--text-bright);"><i class="fa-solid fa-network-wired" style="color:var(--accent-cyan);"></i> ICF 生物心理社會模型互動圖</h3>
         <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.5;">${data.description}</p>
         
-        <div style="background:rgba(0,0,0,0.15); border-radius:12px; padding:20px; border:1px solid var(--card-border);">
+        <div style="background:var(--nested-bg-medium); border-radius:12px; padding:20px; border:1px solid var(--card-border);">
           <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px;">
             ${data.matrix.map(m => `
-              <div style="background:rgba(255,255,255,0.03); border:1px solid var(--card-border); border-radius:8px; padding:16px;">
+              <div style="background:var(--nested-bg-light); border:1px solid var(--card-border); border-radius:8px; padding:16px;">
                 <h4 style="font-size:0.95rem; font-weight:800; color:var(--accent-cyan); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
                   <i class="fa-solid ${
                     m.category === 'health_condition' ? 'fa-notes-medical' :
@@ -1829,7 +1837,7 @@ function renderICFTab(container) {
             </h3>
             <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
               <span style="font-size:0.85rem; color:var(--text-muted); font-weight:600;">選擇模擬案主：</span>
-              <select id="icf-case-selector" class="glass-select" style="background: rgba(0,0,0,0.3); border:1px solid var(--card-border); border-radius:6px; color:var(--text-bright); padding:4px 8px; font-size:0.82rem; cursor:pointer;">
+              <select id="icf-case-selector" class="glass-select" style="background: var(--nested-bg-darkest); border:1px solid var(--card-border); border-radius:6px; color:var(--text-bright); padding:4px 8px; font-size:0.82rem; cursor:pointer;">
                 ${state.cases.map(c => `
                   <option value="${c.id}" ${c.id === selectedCase.id ? 'selected' : ''}>${c.name} (${c.gender}性，${c.age}歲，${state.locale === 'en' ? c.previous_job : (c.previous_job_zh || c.previous_job)})</option>
                 `).join("")}
@@ -2598,10 +2606,10 @@ function renderCaseGenerator(container) {
           </p>
 
           <!-- Import external gene code -->
-          <div style="background:rgba(255,255,255,0.01); border:1px dashed var(--card-border); border-radius:10px; padding:12px; margin-bottom:20px;">
+          <div style="background:var(--nested-bg-faint); border:1px dashed var(--card-border); border-radius:10px; padding:12px; margin-bottom:20px;">
             <label style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:6px;"><i class="fa-solid fa-file-import"></i> 導入同工分享的基因碼</label>
             <div style="display:flex; gap:8px;">
-              <input type="text" id="synthesis-import-code" placeholder="貼上複製的基因防偽碼..." style="flex-grow:1; background:rgba(0,0,0,0.25); border:1px solid var(--card-border); border-radius:6px; padding:6px 10px; font-size:0.78rem; color:var(--text-bright); outline:none;" />
+              <input type="text" id="synthesis-import-code" placeholder="貼上複製的基因防偽碼..." style="flex-grow:1; background:var(--nested-bg-dark); border:1px solid var(--card-border); border-radius:6px; padding:6px 10px; font-size:0.78rem; color:var(--text-bright); outline:none;" />
               <button class="btn btn-cyan" id="synthesis-import-btn" style="padding:6px 12px; font-size:0.75rem; white-space:nowrap;"><i class="fa-solid fa-arrow-down-left-from-top"></i> 導入寫入</button>
             </div>
           </div>
@@ -2963,7 +2971,7 @@ function renderCaseGenerator(container) {
               </div>
 
               <!-- Premium custom card visual layout preview -->
-              <div class="gen-preview-badge" style="flex-grow:1; display:flex; flex-direction:column; justify-content:space-between; padding:12px 16px; margin:0; background:rgba(0,0,0,0.35);">
+              <div class="gen-preview-badge" style="flex-grow:1; display:flex; flex-direction:column; justify-content:space-between; padding:12px 16px; margin:0; background:var(--nested-bg-darkest);">
                 <div>
                   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                     <span style="font-size:1.8rem; background:rgba(6,182,212,0.1); border:1px solid rgba(6,182,212,0.2); width:40px; height:40px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center;">
@@ -3109,13 +3117,13 @@ function startRoleplaySession(selectedCase) {
           if (isOptimal) return `
             <div id="rp-chrome-stt-banner" style="display:flex; align-items:center; gap:8px; padding:8px 14px; margin-bottom:10px; border-radius:8px; background:rgba(6,182,212,0.08); border:1px solid rgba(6,182,212,0.25); font-size:0.78rem; color:var(--accent-cyan); transition:all 0.3s ease;">
               <i class="fa-solid fa-circle-check" style="flex-shrink:0;"></i>
-              <span>Chrome 廣東話模式已啟用 (<code style="background:rgba(0,0,0,0.2); padding:1px 4px; border-radius:3px; font-size:0.72rem;">yue-Hant-HK</code>)。如仍被誤判為普通話，請嘗試<b>無痕視窗</b>訪問。</span>
+              <span>Chrome 廣東話模式已啟用 (<code style="background:var(--nested-bg-medium); padding:1px 4px; border-radius:3px; font-size:0.72rem;">yue-Hant-HK</code>)。如仍被誤判為普通話，請嘗試<b>無痕視窗</b>訪問。</span>
             </div>
           `;
           return `
             <div id="rp-chrome-stt-banner" style="display:flex; align-items:center; gap:8px; padding:8px 14px; margin-bottom:10px; border-radius:8px; background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.3); font-size:0.78rem; color:var(--accent-amber); transition:all 0.3s ease;">
               <i class="fa-solid fa-triangle-exclamation" style="flex-shrink:0;"></i>
-              <span>Chrome 目前使用 <code style="background:rgba(0,0,0,0.2); padding:1px 4px; border-radius:3px; font-size:0.72rem;">${state.recognitionLang}</code>，廣東話可能被誤判為普通話。</span>
+              <span>Chrome 目前使用 <code style="background:var(--nested-bg-medium); padding:1px 4px; border-radius:3px; font-size:0.72rem;">${state.recognitionLang}</code>，廣東話可能被誤判為普通話。</span>
               <button id="rp-chrome-fix-btn" class="btn" style="margin-left:auto; padding:3px 10px; font-size:0.72rem; font-weight:700; background:rgba(251,191,36,0.15); border:1px solid rgba(251,191,36,0.4); color:var(--accent-amber); border-radius:6px; cursor:pointer; white-space:nowrap; transition:all 0.2s ease;">一鍵切換 yue-Hant-HK</button>
             </div>
           `;
@@ -3147,7 +3155,7 @@ function startRoleplaySession(selectedCase) {
           </div>
 
           <!-- Phase 13: Empathy Sentiment Heuristics HUD -->
-          <div id="rp-empathy-hud" style="display:flex; align-items:center; justify-content:space-between; padding:6px 12px; background:rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.06); border-radius:6px; font-size:0.75rem; color:var(--text-muted); transition:all 0.3s ease;">
+          <div id="rp-empathy-hud" style="display:flex; align-items:center; justify-content:space-between; padding:6px 12px; background:var(--nested-bg-dark); border:1px solid var(--card-border); border-radius:6px; font-size:0.75rem; color:var(--text-muted); transition:all 0.3s ease;">
             <div style="display:flex; align-items:center; gap:6px; min-width:0; flex:1;">
               <span id="empathy-hud-indicator-dot" style="width:6px; height:6px; border-radius:50%; background:var(--text-muted); display:inline-block; flex-shrink:0; transition:all 0.3s ease;"></span>
               <span id="empathy-hud-status-text" style="white-space:nowrap; text-overflow:ellipsis; overflow:hidden;">等待輸入共情反映詞（MI OARS / ACT）...</span>
@@ -3176,7 +3184,7 @@ function startRoleplaySession(selectedCase) {
               <i class="fa-solid fa-eye"></i> <span id="rp-show-coach-hint-btn-text">${state.locale === "en" ? "Show Supervisor Suggestion" : "顯示督導建議回應"}</span>
             </button>
           </div>
-          <div id="rp-coach-feedback" style="font-size:0.82rem; color:var(--text-main); line-height:1.5; display:none; background:rgba(0,0,0,0.15); padding:10px; border-radius:8px; border:1px dashed var(--card-border);">
+          <div id="rp-coach-feedback" style="font-size:0.82rem; color:var(--text-main); line-height:1.5; display:none; background:var(--nested-bg-medium); padding:10px; border-radius:8px; border:1px dashed var(--card-border);">
             【會話初始提示】：案主${clientShortName}剛進來，擺出強烈的抗拒姿態。請不要立刻勸他去上堂，建議先使用 MI 的「同理反映」接納他的氣憤與無力感，與他建立工作同盟。
           </div>
         </div>
@@ -3274,7 +3282,7 @@ function startRoleplaySession(selectedCase) {
               
               <div style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
                 <label style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">自定義干預指令 (Custom Directing)</label>
-                <textarea id="rp-intervention-input" style="background:rgba(0,0,0,0.3); border:1px solid var(--card-border); color:var(--text-bright); border-radius:6px; padding:8px; font-size:0.75rem; height:65px; resize:none; font-family:inherit; outline:none; transition:border-color 0.2s;" placeholder="輸入你想命令案主表現出的具體情緒狀態或心理防衛反應..."></textarea>
+                <textarea id="rp-intervention-input" style="background:var(--nested-bg-darkest); border:1px solid var(--card-border); color:var(--text-bright); border-radius:6px; padding:8px; font-size:0.75rem; height:65px; resize:none; font-family:inherit; outline:none; transition:border-color 0.2s;" placeholder="輸入你想命令案主表現出的具體情緒狀態或心理防衛反應..."></textarea>
                 <button class="btn btn-primary" id="rp-intervention-send-btn" style="margin-top:4px; font-size:0.75rem; padding:6px 12px; justify-content:center; background:linear-gradient(135deg, var(--accent-purple) 0%, #5b21b6 100%); width:100%;">
                   <i class="fa-solid fa-bolt"></i> 注入臨床干預指令
                 </button>
@@ -3282,7 +3290,7 @@ function startRoleplaySession(selectedCase) {
               
               <div style="margin-top:6px; display:flex; flex-direction:column; gap:4px;">
                 <label style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase;">已注入干預記錄 (Active Logs)</label>
-                <div id="rp-intervention-logs" style="background:rgba(0,0,0,0.25); border:1px solid var(--card-border); border-radius:6px; padding:8px; min-height:75px; max-height:100px; overflow-y:auto; font-size:0.7rem; font-family:'Courier New', monospace; color:var(--accent-cyan); display:flex; flex-direction:column; gap:4px;">
+                <div id="rp-intervention-logs" style="background:var(--nested-bg-dark); border:1px solid var(--card-border); border-radius:6px; padding:8px; min-height:75px; max-height:100px; overflow-y:auto; font-size:0.7rem; font-family:'Courier New', monospace; color:var(--accent-cyan); display:flex; flex-direction:column; gap:4px;">
                   <span style="color:var(--text-muted);">[系統] 目前為預設模擬環境。</span>
                 </div>
               </div>
@@ -3439,7 +3447,7 @@ function startRoleplaySession(selectedCase) {
         banner.style.color = "var(--accent-cyan)";
         banner.innerHTML = `
           <i class="fa-solid fa-circle-check" style="flex-shrink:0;"></i>
-          <span>已切換至 <code style="background:rgba(0,0,0,0.2); padding:1px 4px; border-radius:3px; font-size:0.72rem;">yue-Hant-HK</code> 廣東話專用模式！下次錄音即生效。</span>
+          <span>已切換至 <code style="background:var(--nested-bg-medium); padding:1px 4px; border-radius:3px; font-size:0.72rem;">yue-Hant-HK</code> 廣東話專用模式！下次錄音即生效。</span>
         `;
       }
       AudioSynth.playSuccess();
@@ -4278,7 +4286,7 @@ function renderCoLearning(container) {
   container.innerHTML = `
     <div class="grid-2col" style="margin-bottom:24px; align-items:stretch;">
       <!-- Left pane: Standard Case study (Projector Mode Optimized) -->
-      <div class="glass-card co-projector-panel" style="display:flex; flex-direction:column; gap:20px; border: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.25);">
+      <div class="glass-card co-projector-panel" style="display:flex; flex-direction:column; gap:20px; border: 1px solid var(--card-border); background: var(--nested-bg-dark);">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <span class="tag tag-purple" style="font-size:0.75rem; padding:4px 8px; font-weight:700;"><i class="fa-solid fa-desktop"></i> ${state.locale === "en" ? "Projector Classroom Mode" : "大螢幕投影研討艙"}</span>
           <h4 style="font-weight:800; color:var(--accent-cyan); font-size:0.8rem; letter-spacing:0.5px;">
@@ -4289,7 +4297,7 @@ function renderCoLearning(container) {
         <h3 style="font-size:1.45rem; font-weight:900; color:var(--text-bright); line-height:1.4; text-shadow:0 0 10px rgba(255,255,255,0.05);">${caseData.title}</h3>
         <p style="font-size:0.95rem; color:var(--text-main); line-height:1.6; font-weight:600;">${caseData.description}</p>
         
-        <div class="co-dialogue-segment-box" style="background:rgba(0,0,0,0.35); border-radius:12px; padding:22px; border:1px solid rgba(6,182,212,0.2); box-shadow:inset 0 0 12px rgba(6,182,212,0.04);">
+        <div class="co-dialogue-segment-box" style="background:var(--nested-bg-darkest); border-radius:12px; padding:22px; border:1px solid rgba(6,182,212,0.2); box-shadow:inset 0 0 12px rgba(6,182,212,0.04);">
           <h4 style="font-size:0.92rem; font-weight:900; color:var(--accent-cyan); margin-bottom:12px; display:flex; align-items:center; gap:6px;">
             <i class="fa-solid fa-quote-left"></i>
             ${state.locale === "en" ? "Client Resistance Dialogue Segment:" : "輔導面談情境片段："}
@@ -4317,15 +4325,15 @@ function renderCoLearning(container) {
           <label style="font-size:0.8rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">
             ${state.locale === "en" ? "Dialogue Segment Input" : "案主阻抗對白片段輸入"}
           </label>
-          <textarea id="ai-quiz-input" placeholder="${state.locale === "en" ? "Enter client dialogue segment here..." : "例如：我開左三十年小巴，依家半身中風，你叫我點樣報ERB課程，班後生仔實笑我慢啦，去黎都係嘥氣！"}" style="width:100%; flex-grow:1; min-height:140px; background:rgba(0,0,0,0.25); border:1px solid var(--card-border); border-radius:10px; padding:12px; color:var(--text-bright); font-family:inherit; font-size:0.85rem; resize:none; outline:none; transition:var(--transition-smooth);"></textarea>
+          <textarea id="ai-quiz-input" placeholder="${state.locale === "en" ? "Enter client dialogue segment here..." : "例如：我開左三十年小巴，依家半身中風，你叫我點樣報ERB課程，班後生仔實笑我慢啦，去黎都係嘥氣！"}" style="width:100%; flex-grow:1; min-height:140px; background:var(--nested-bg-dark); border:1px solid var(--card-border); border-radius:10px; padding:12px; color:var(--text-bright); font-family:inherit; font-size:0.85rem; resize:none; outline:none; transition:var(--transition-smooth);"></textarea>
         </div>
 
         <button class="btn btn-primary shimmer-btn" id="ai-quiz-generate-btn" style="width:100%; justify-content:center;">
           <i class="fa-solid fa-wand-magic-sparkles"></i> ${state.locale === "en" ? "Synthesize Custom Study Quiz" : "注入特徵並生成研討題"}
         </button>
 
-        <div id="ai-custom-quiz-stage" style="display:none; background:rgba(0,0,0,0.15); border:1px solid var(--card-border); border-radius:12px; padding:16px; margin-top:12px; animation:fadeIn 0.5s ease;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:8px;">
+        <div id="ai-custom-quiz-stage" style="display:none; background:var(--nested-bg-medium); border:1px solid var(--card-border); border-radius:12px; padding:16px; margin-top:12px; animation:fadeIn 0.5s ease;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid var(--card-border); padding-bottom:8px;">
             <span class="tag tag-green">${state.locale === "en" ? "AI Generated Quiz" : "AI 合成題目艙已就緒"}</span>
             <button class="btn btn-circle" id="ai-custom-quiz-close" style="width:24px; height:24px; font-size:0.75rem; border:none; background:transparent;"><i class="fa-solid fa-xmark"></i></button>
           </div>
@@ -5050,7 +5058,7 @@ function renderAnalytics(container) {
         </p>
 
         <!-- Dynamic Recommendation Console mounting point -->
-        <div id="radar-recommendation-panel" style="width:100%; background:rgba(0,0,0,0.15); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:12px; animation:fadeIn 0.4s ease; text-align:left;">
+        <div id="radar-recommendation-panel" style="width:100%; background:var(--nested-bg-medium); border:1px solid var(--card-border); border-radius:10px; padding:12px; animation:fadeIn 0.4s ease; text-align:left;">
           <div id="radar-rec-content"></div>
         </div>
       </div>
@@ -5270,7 +5278,7 @@ function showSessionDetailPopup(session) {
         <div class="popup-tab-content" id="popup-content-report">
           <div class="grid-2col" style="gap: 16px;">
             <!-- Radar representation -->
-            <div class="glass-card" style="display:flex; flex-direction:column; gap:12px; align-items:center; background:rgba(0,0,0,0.15); padding:16px;">
+            <div class="glass-card" style="display:flex; flex-direction:column; gap:12px; align-items:center; background:var(--nested-bg-medium); padding:16px;">
               <h4 style="font-size:0.85rem; font-weight:800; color:var(--text-bright); align-self:flex-start;">
                 ${state.locale === "en" ? "Competence Scores" : state.locale === "zh-CN" ? "本次面谈技巧评分" : "本次面談技巧評分"}
               </h4>
@@ -5311,23 +5319,23 @@ function showSessionDetailPopup(session) {
               </svg>
               
               <div style="width:100%; display:flex; flex-direction:column; gap:4px; font-size:0.75rem;">
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed rgba(255,255,255,0.06);">
+                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
                   <span style="color:var(--text-muted);">${state.locale === "en" ? "Empathy (MI OARS)" : "同理反映"}</span>
                   <span style="font-weight:700; color:var(--text-bright);">${empathy}</span>
                 </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed rgba(255,255,255,0.06);">
+                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
                   <span style="color:var(--text-muted);">${state.locale === "en" ? "Capture Change Talk" : "改變談話"}</span>
                   <span style="font-weight:700; color:var(--text-bright);">${changeTalk}</span>
                 </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed rgba(255,255,255,0.06);">
+                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
                   <span style="color:var(--text-muted);">${state.locale === "en" ? "ACT Flexibility" : "心理彈性"}</span>
                   <span style="font-weight:700; color:var(--text-bright);">${actFlexibility}</span>
                 </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed rgba(255,255,255,0.06);">
+                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
                   <span style="color:var(--text-muted);">${state.locale === "en" ? "ICF Matrix Diagnostic" : "全人評估"}</span>
                   <span style="font-weight:700; color:var(--text-bright);">${icfAccuracy}</span>
                 </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed rgba(255,255,255,0.06);">
+                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
                   <span style="color:var(--text-muted);">${state.locale === "en" ? "Action Planning" : "承諾行動"}</span>
                   <span style="font-weight:700; color:var(--text-bright);">${actionPlanning}</span>
                 </div>
@@ -5339,7 +5347,7 @@ function showSessionDetailPopup(session) {
               <h4 style="font-size:0.9rem; font-weight:800; color:var(--text-bright); display:flex; align-items:center; gap:6px;">
                 <i class="fa-solid fa-user-tie" style="color:var(--accent-cyan);"></i> ${state.locale === "en" ? "Clinical Summary Feedback" : "督導意見總結"}
               </h4>
-              <p style="font-size:0.8rem; color:var(--text-main); line-height:1.6; background:rgba(255,255,255,0.02); padding:12px; border-radius:8px; border-left:4px solid var(--accent-cyan); max-height:220px; overflow-y:auto;">
+              <p style="font-size:0.8rem; color:var(--text-main); line-height:1.6; background:var(--nested-bg-faint); padding:12px; border-radius:8px; border-left:4px solid var(--accent-cyan); max-height:220px; overflow-y:auto;">
                 ${session.report.summary.replace(/\n/g, "<br>")}
               </p>
             </div>
@@ -5348,7 +5356,7 @@ function showSessionDetailPopup(session) {
 
         <!-- Section 2: Dialogue Transcript Tab Content -->
         <div class="popup-tab-content" id="popup-content-transcript" style="display:none;">
-          <div class="chat-history-container" style="max-height: 380px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 12px; background: rgba(0,0,0,0.15); border-radius: 8px;">
+          <div class="chat-history-container" style="max-height: 380px; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 12px; background: var(--nested-bg-medium); border-radius: 8px;">
             ${session.history.map(msg => {
               const isUser = msg.role === "user";
               return `
@@ -5433,6 +5441,14 @@ function renderSettings(container) {
       <form id="settings-form" style="display:flex; flex-direction:column; gap:12px;">
         
         <div class="form-group">
+          <label>同工姓名 / 用戶姓名 (User Name)</label>
+          <input type="text" id="set-user-name" value="${state.userName || ''}" placeholder="例如：陳大文 (請輸入你的姓名)" />
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+            👤 輸入你的姓名後，左下角的「職業復康同工」將會更新為「職業復康同工 (你的姓名)」。
+          </p>
+        </div>
+
+        <div class="form-group">
           <label>Google Gemini API 金鑰 (API Key)</label>
           <input type="password" id="set-api-key" value="${state.apiKey}" placeholder="輸入 AI 在線模式的金鑰 (AI-ZASy...)" />
           <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
@@ -5486,7 +5502,7 @@ function renderSettings(container) {
         </div>
       </form>
 
-      <div style="border-top: 1px solid rgba(255,255,255,0.06); margin-top: 20px; padding-top: 20px;">
+      <div style="border-top: 1px solid var(--card-border); margin-top: 20px; padding-top: 20px;">
         <h4 style="font-size:0.88rem; font-weight:800; color:var(--accent-red); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
           <i class="fa-solid fa-triangle-exclamation"></i> 危險區域 (Danger Zone)
         </h4>
@@ -5506,21 +5522,25 @@ function renderSettings(container) {
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     
+    const userName = document.getElementById("set-user-name").value.trim();
     const key = document.getElementById("set-api-key").value.trim();
     const model = document.getElementById("set-model").value;
     const voice = document.getElementById("set-voice").value;
     const recLang = document.getElementById("set-rec-lang").value;
  
+    state.userName = userName;
     state.apiKey = key;
     state.selectedModel = model;
     state.selectedVoiceName = voice;
     state.recognitionLang = recLang;
  
+    localStorage.setItem("rehab_user_name", userName);
     localStorage.setItem("rehab_gemini_api_key", key);
     localStorage.setItem("rehab_selected_model", model);
     localStorage.setItem("rehab_selected_voice", voice);
     localStorage.setItem("rehab_recognition_lang", recLang);
  
+    updateStaticUIStrings();
     updateApiBadge();
     alert("設定儲存成功！");
     
@@ -5551,6 +5571,8 @@ function renderSettings(container) {
       localStorage.removeItem("rehab_completed_case_ids");
       localStorage.removeItem("rehab_selected_voice");
       localStorage.removeItem("rehab_speech_muted");
+      localStorage.removeItem("rehab_theory_progress");
+      localStorage.removeItem("rehab_user_name");
 
       // 3. Reset state properties to defaults
       state.cases = [...MOCK_CASES];
@@ -5563,8 +5585,17 @@ function renderSettings(container) {
       state.miGameIndex = 0;
       state.isSpeechMuted = false;
       state.selectedVoiceName = "";
+      state.userName = "";
+      state.theoryProgress = {
+        act: { info: false, flashcards: false, test: false },
+        mi: { info: false, flashcards: false, test: false },
+        icf: { info: false, flashcards: false, test: false }
+      };
 
-      // 4. Show success toast (re-uses existing styled toast element)
+      // 4. Update UI immediately
+      updateStaticUIStrings();
+
+      // 5. Show success toast (re-uses existing styled toast element)
       const toast = document.createElement("div");
       toast.className = "achievement-toast show";
       toast.innerHTML = `
@@ -5581,10 +5612,10 @@ function renderSettings(container) {
         setTimeout(() => toast.remove(), 600);
       }, 4000);
 
-      // 5. Update Badge UI
+      // 6. Update Badge UI
       updateApiBadge();
 
-      // 6. Direct jump back to Dashboard
+      // 7. Direct jump back to Dashboard
       const dashLink = document.querySelector('.nav-item[data-target="dashboard"]');
       if (dashLink) dashLink.click();
     });
