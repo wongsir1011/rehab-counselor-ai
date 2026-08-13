@@ -30,6 +30,12 @@ export const state = {
   activeHexaNode: "acceptance",
   voices: [],
   selectedVoiceName: localStorage.getItem("rehab_selected_voice") || "",
+  ttsEngine: localStorage.getItem("rehab_tts_engine") || "system", // "system", "minimax-global", "minimax-cn"
+  minimaxApiKey: localStorage.getItem("rehab_minimax_api_key") || "",
+  minimaxGroupId: localStorage.getItem("rehab_minimax_group_id") || "",
+  minimaxMaleTimbre: localStorage.getItem("rehab_minimax_male_timbre") || "cantonese_male",
+  minimaxFemaleTimbre: localStorage.getItem("rehab_minimax_female_timbre") || "cantonese_female",
+  activeAudioElement: null,
   quoteIntervalId: null,
   mysteryTimeoutId: null,
   activeUtterance: null,

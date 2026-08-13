@@ -1,7 +1,24 @@
-// RehabCounselor AI - Web Speech API Engine (STT & Emotional TTS)
+// RehabCounselor AI - Web Speech API Engine (STT, Emotional TTS & MiniMax API Integration)
 
 import { state } from "./state.js";
 import { AudioSynth } from "./audioSynth.js";
+
+function hexToArrayBuffer(hex) {
+  const bytes = new Uint8Array(Math.ceil(hex.length / 2));
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes.buffer;
+}
+
+function base64ToArrayBuffer(base64) {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
 
 export function initSpeechEngine(onVoicesChangedCallback = null) {
   if (typeof window !== "undefined" && window.speechSynthesis) {
@@ -37,6 +54,12 @@ export function clearAllSpeakingStates() {
   if (avatar) {
     avatar.classList.remove("speaking-pulse");
   }
+  if (state.activeAudioElement) {
+    try {
+      state.activeAudioElement.pause();
+      state.activeAudioElement = null;
+    } catch (e) {}
+  }
   state.activeUtterance = null;
 }
 
@@ -51,6 +74,119 @@ export function speakCantonese(text, bubbleEl = null, forcePlay = false) {
   }
   
   const cleanText = text.replace(/【.*】/g, "").trim();
+
+  // 若使用者選擇 MiniMax 廣東話語音引擎且填寫了 API Key
+  if ((state.ttsEngine === "minimax-global" || state.ttsEngine === "minimax-cn") && state.minimaxApiKey) {
+    speakMiniMaxCantonese(cleanText, bubbleEl);
+  } else {
+    speakSystemCantonese(cleanText, bubbleEl, forcePlay);
+  }
+}
+
+async function speakMiniMaxCantonese(cleanText, bubbleEl = null) {
+  const isGlobal = state.ttsEngine === "minimax-global";
+  const baseUrl = isGlobal 
+    ? "https://api.minimaxi.chat/v1/t2a_v2" 
+    : "https://api.minimax.chat/v1/t2a_v2";
+  
+  const url = `${baseUrl}?GroupId=${encodeURIComponent(state.minimaxGroupId || "")}`;
+  
+  const isFemaleCase = state.activeCase && state.activeCase.gender === "女";
+  const timbre = isFemaleCase 
+    ? (state.minimaxFemaleTimbre || "cantonese_female") 
+    : (state.minimaxMaleTimbre || "cantonese_male");
+
+  const body = {
+    model: "speech-01-hd",
+    text: cleanText,
+    stream: false,
+    voice_setting: {
+      voice_id: timbre,
+      speed: 1.0,
+      vol: 1.0,
+      pitch: 0
+    },
+    audio_setting: {
+      sample_rate: 32000,
+      bitrate: 128000,
+      format: "mp3",
+      channel: 1
+    }
+  };
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${state.minimaxApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      throw new Error(`MiniMax API HTTP Error ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (data.base_resp && data.base_resp.status_code !== 0) {
+      throw new Error(`MiniMax Error: ${data.base_resp.status_msg}`);
+    }
+
+    let audioData = null;
+    if (data.data && data.data.audio) {
+      audioData = data.data.audio;
+    } else if (data.audio_file) {
+      audioData = data.audio_file;
+    }
+
+    if (!audioData) {
+      throw new Error("MiniMax API 未回傳音訊數據");
+    }
+
+    let arrayBuffer = null;
+    if (typeof audioData === "string") {
+      if (/^[0-9a-fA-F]+$/.test(audioData.substring(0, 100))) {
+        arrayBuffer = hexToArrayBuffer(audioData);
+      } else {
+        arrayBuffer = base64ToArrayBuffer(audioData.replace(/^data:audio\/\w+;base64,/, ""));
+      }
+    }
+
+    const blob = new Blob([arrayBuffer], { type: "audio/mp3" });
+    const blobUrl = URL.createObjectURL(blob);
+    const audio = new Audio(blobUrl);
+    state.activeAudioElement = audio;
+
+    if (bubbleEl) bubbleEl.classList.add("is-speaking");
+    const avatar = document.getElementById("rp-active-avatar");
+    if (avatar) avatar.classList.add("speaking-pulse");
+
+    audio.onended = () => {
+      if (bubbleEl) bubbleEl.classList.remove("is-speaking");
+      if (avatar) avatar.classList.remove("speaking-pulse");
+      URL.revokeObjectURL(blobUrl);
+      state.activeAudioElement = null;
+    };
+
+    audio.onerror = (e) => {
+      console.warn("MiniMax 語音播放失敗，降級至系統 Web Speech API:", e);
+      if (bubbleEl) bubbleEl.classList.remove("is-speaking");
+      if (avatar) avatar.classList.remove("speaking-pulse");
+      URL.revokeObjectURL(blobUrl);
+      state.activeAudioElement = null;
+      speakSystemCantonese(cleanText, bubbleEl, true);
+    };
+
+    await audio.play();
+
+  } catch (err) {
+    console.warn("MiniMax API 請求失敗，自動無縫降級至系統 Web Speech API:", err);
+    speakSystemCantonese(cleanText, bubbleEl, true);
+  }
+}
+
+export function speakSystemCantonese(cleanText, bubbleEl = null, forcePlay = false) {
   const utterance = new SpeechSynthesisUtterance(cleanText);
   utterance.lang = "zh-HK";
 
@@ -61,41 +197,36 @@ export function speakCantonese(text, bubbleEl = null, forcePlay = false) {
       state.speechUtteranceRefs.delete(oldestUtterance);
     }
   }
-  
-  if (state.selectedVoiceName && state.selectedVoiceName !== "") {
-    const matched = state.voices.find(v => v.name === state.selectedVoiceName);
-    if (matched) utterance.voice = matched;
-  } else {
-    const hkVoices = state.voices.filter(v => 
-      v.lang === "zh-HK" || 
-      v.lang === "zh-Hant-HK" || 
-      v.lang.toLowerCase().replace(/_/g, "-").startsWith("zh-hk") ||
-      v.name.toLowerCase().includes("hong kong") ||
-      v.name.toLowerCase().includes("cantonese") ||
-      v.name.toLowerCase().includes("sin-ji")
-    );
-    
-    if (hkVoices.length > 0) {
-      const isFemaleCase = state.activeCase && state.activeCase.gender === "女";
-      let selectedVoice = null;
-      
-      if (isFemaleCase) {
-        const femaleKeywords = ["sin-ji", "tracy", "hiumaan", "ting-ting", "yu-ting", "female", "szemin"];
-        selectedVoice = hkVoices.find(v => 
-          femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
-        );
-      } else {
-        const maleKeywords = ["danny", "wanlung", "limu", "male", "kangkang"];
-        selectedVoice = hkVoices.find(v => 
-          maleKeywords.some(kw => v.name.toLowerCase().includes(kw))
-        );
-      }
-      
-      if (!selectedVoice) {
-        selectedVoice = hkVoices[0];
-      }
-      utterance.voice = selectedVoice;
-    }
+
+  const isFemaleCase = state.activeCase && state.activeCase.gender === "女";
+  const isMaleCase = state.activeCase && state.activeCase.gender === "男";
+
+  let selectedVoice = null;
+  const hkVoices = state.voices.filter(v => 
+    v.lang === "zh-HK" || 
+    v.lang === "zh-Hant-HK" || 
+    v.lang.toLowerCase().replace(/_/g, "-").startsWith("zh-hk") ||
+    v.name.toLowerCase().includes("hong kong") ||
+    v.name.toLowerCase().includes("cantonese") ||
+    v.name.toLowerCase().includes("sin-ji")
+  );
+
+  if (isMaleCase) {
+    const maleKeywords = ["danny", "wanlung", "limu", "male", "kangkang", "man", "boy", "yunlin", "kwan"];
+    selectedVoice = hkVoices.find(v => maleKeywords.some(kw => v.name.toLowerCase().includes(kw)));
+  } else if (isFemaleCase) {
+    const femaleKeywords = ["sin-ji", "tracy", "hiumaan", "ting-ting", "yu-ting", "female", "szemin", "sinji", "hiuga"];
+    selectedVoice = hkVoices.find(v => femaleKeywords.some(kw => v.name.toLowerCase().includes(kw)));
+  }
+
+  if (!selectedVoice && state.selectedVoiceName) {
+    selectedVoice = state.voices.find(v => v.name === state.selectedVoiceName);
+  }
+  if (!selectedVoice && hkVoices.length > 0) {
+    selectedVoice = hkVoices[0];
+  }
+  if (selectedVoice) {
+    utterance.voice = selectedVoice;
   }
 
   let rate = 1.05;
@@ -114,9 +245,20 @@ export function speakCantonese(text, bubbleEl = null, forcePlay = false) {
       pitch = 0.92;
     }
   }
+
+  // ⚠️ 男個案音高校正：若無系統原生男聲 (如 macOS 預設 Sin-Ji)，強行降調至 0.76，營造沉穩男聲效果
+  if (isMaleCase) {
+    const voiceName = (utterance.voice ? utterance.voice.name : "").toLowerCase();
+    const isExplicitMale = ["danny", "wanlung", "limu", "male", "kangkang", "man", "boy", "yunlin", "kwan"].some(kw => voiceName.includes(kw));
+    if (!isExplicitMale) {
+      pitch *= 0.76;
+    }
+  } else if (isFemaleCase) {
+    pitch *= 1.05;
+  }
   
   utterance.rate = rate;
-  utterance.pitch = pitch;
+  utterance.pitch = Math.max(0.5, Math.min(2.0, pitch));
   state.activeUtterance = utterance;
 
   utterance.onstart = () => {
@@ -149,7 +291,7 @@ export function speakCantonese(text, bubbleEl = null, forcePlay = false) {
   utterance.onend = cleanup;
   utterance.onerror = cleanup;
 
-  if (text.includes("…") || text.includes("...") || Math.random() < 0.3) {
+  if (cleanText.includes("…") || cleanText.includes("...") || Math.random() < 0.25) {
     AudioSynth.playSigh();
     setTimeout(() => {
       if (state.activeUtterance === utterance) {
@@ -181,158 +323,118 @@ export function initVoiceRecognition(inputEl) {
   }
 
   const recognition = new SpeechRecognition();
-  recognition.continuous = true;
-  recognition.lang = state.recognitionLang;
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 1;
-
   state.recognition = recognition;
+  
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = state.recognitionLang;
 
-  micBtn.addEventListener("click", () => {
-    if (state.isRecording) {
-      recognition.stop();
-    } else {
-      try {
-        recognition.lang = state.recognitionLang;
-        recognition.start();
-      } catch (err) {
-        console.error(err);
-      }
-    }
-  });
+  let finalTranscript = "";
 
   recognition.onstart = () => {
     state.isRecording = true;
     micBtn.classList.add("recording");
-    waveHud.classList.add("active");
-    statusText.textContent = `🎙️ 正在連續錄音中 (${state.recognitionLang})... 請說話，再次點擊麥克風以結束`;
-    statusText.style.color = "var(--accent-green)";
+    if (waveHud) waveHud.classList.add("active");
     startVoiceFFT();
+    statusText.textContent = `正聆聽廣東話 (${state.recognitionLang})... 請講話`;
+    AudioSynth.playClick();
+  };
+
+  recognition.onresult = (event) => {
+    let interimTranscript = "";
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        finalTranscript += event.results[i][0].transcript;
+      } else {
+        interimTranscript += event.results[i][0].transcript;
+      }
+    }
+    if (inputEl) {
+      inputEl.value = finalTranscript || interimTranscript;
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.warn("Speech recognition error:", event.error);
+    stopRecording();
+    AudioSynth.playError();
+    statusText.textContent = `語音識別提示: ${event.error}`;
   };
 
   recognition.onend = () => {
     state.isRecording = false;
     micBtn.classList.remove("recording");
-    waveHud.classList.remove("active");
+    if (waveHud) waveHud.classList.remove("active");
+    stopVoiceFFT();
     statusText.textContent = `點擊麥克風即可直接講話 (${state.recognitionLang})`;
-    statusText.style.color = "var(--text-muted)";
-    stopVoiceFFT();
   };
 
-  recognition.onerror = (e) => {
-    console.error("Speech Recognition Error:", e);
-    statusText.textContent = `語音出錯：${e.error === 'not-allowed' ? '未授權麥克風' : e.error}`;
-    statusText.style.color = "var(--accent-rose)";
-    state.isRecording = false;
-    micBtn.classList.remove("recording");
-    waveHud.classList.remove("active");
-    stopVoiceFFT();
-  };
-
-  recognition.onresult = (event) => {
-    let localFinal = "";
-    let interimTranscript = "";
-    for (let i = 0; i < event.results.length; ++i) {
-      const result = event.results[i];
-      if (result.isFinal) {
-        localFinal += result[0].transcript;
-      } else {
-        interimTranscript += result[0].transcript;
+  micBtn.addEventListener("click", () => {
+    if (state.isRecording) {
+      recognition.stop();
+    } else {
+      finalTranscript = "";
+      recognition.lang = state.recognitionLang;
+      try {
+        recognition.start();
+      } catch (err) {
+        console.warn("Recognition start failed:", err);
       }
     }
-    inputEl.value = localFinal + interimTranscript;
-
-    statusText.textContent = `🎙️ 正在錄音中... 再次點擊麥克風以停止`;
-    statusText.style.color = "var(--accent-green)";
-
-    const speechToText = localFinal + interimTranscript;
-    const simplifiedChars = /[这个么们来对说让还为没什从]/;
-    if (simplifiedChars.test(speechToText) && state.recognitionLang !== 'zh-CN') {
-      statusText.textContent = `⚠️ 辨識結果疑似為普通話，建議在設定中切換至 yue-Hant-HK 或使用無痕視窗`;
-      statusText.style.color = "var(--accent-amber)";
-    }
-  };
+  });
 }
 
+let audioContext = null;
+let analyser = null;
+let microphone = null;
+let animationFrameId = null;
+
 export function startVoiceFFT() {
-  const canvas = document.getElementById("voice-fft-canvas");
-  const staticBars = document.getElementById("rp-static-wave-bars");
-  if (!canvas) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
 
-  canvas.width = 180;
-  canvas.height = 30;
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    microphone = audioContext.createMediaStreamSource(stream);
+    
+    analyser.fftSize = 64;
+    microphone.connect(analyser);
 
-  canvas.style.display = "block";
-  if (staticBars) staticBars.style.display = "none";
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    const bars = document.querySelectorAll(".wave-bar");
 
-  navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-    .then(stream => {
-      state.audioStream = stream;
-      AudioSynth.initContext();
-      const ctx = AudioSynth.ctx;
-      
-      state.audioSource = ctx.createMediaStreamSource(stream);
-      state.audioAnalyser = ctx.createAnalyser();
-      state.audioAnalyser.fftSize = 256;
-      
-      state.audioSource.connect(state.audioAnalyser);
-      
-      const bufferLength = state.audioAnalyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      const canvasCtx = canvas.getContext("2d");
-      
-      function draw() {
-        if (!state.isRecording) return;
-        state.fftAnimationId = requestAnimationFrame(draw);
-        state.audioAnalyser.getByteFrequencyData(dataArray);
-        
-        canvasCtx.fillStyle = "rgba(10, 12, 18, 0.45)";
-        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        const barWidth = (canvas.width / bufferLength) * 1.5;
-        let barHeight;
-        let x = 0;
-        
-        for (let i = 0; i < bufferLength; i++) {
-          barHeight = dataArray[i] / 8;
-          const hue = (i / bufferLength) * 120 + 180;
-          canvasCtx.fillStyle = `hsla(${hue}, 100%, 60%, 0.95)`;
-          canvasCtx.fillRect(x, canvas.height - barHeight, barWidth - 1.5, barHeight);
-          canvasCtx.fillStyle = "#ffffff";
-          canvasCtx.fillRect(x, canvas.height - barHeight - 1, barWidth - 1.5, 1);
-          x += barWidth;
-        }
-      }
-      
-      draw();
-    })
-    .catch(err => {
-      console.warn("Speech FFT capture rejected or unsupported:", err);
-      canvas.style.display = "none";
-      if (staticBars) staticBars.style.display = "flex";
-    });
+    function drawFFT() {
+      if (!state.isRecording) return;
+      animationFrameId = requestAnimationFrame(drawFFT);
+      analyser.getByteFrequencyData(dataArray);
+
+      bars.forEach((bar, index) => {
+        const val = dataArray[index % bufferLength] || 0;
+        const scale = Math.max(0.15, val / 255);
+        bar.style.transform = `scaleY(${scale * 2.5})`;
+      });
+    }
+
+    drawFFT();
+  }).catch(err => {
+    console.warn("Microphone FFT Access Denied or Unavailable:", err);
+  });
 }
 
 export function stopVoiceFFT() {
-  const canvas = document.getElementById("voice-fft-canvas");
-  const staticBars = document.getElementById("rp-static-wave-bars");
-  if (canvas) canvas.style.display = "none";
-  if (staticBars) staticBars.style.display = "flex";
-
-  if (state.fftAnimationId) {
-    cancelAnimationFrame(state.fftAnimationId);
-    state.fftAnimationId = null;
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
   }
-  if (state.audioStream) {
-    state.audioStream.getTracks().forEach(track => track.stop());
-    state.audioStream = null;
+  if (microphone && microphone.mediaStream) {
+    microphone.mediaStream.getTracks().forEach(track => track.stop());
   }
-  if (state.audioSource) {
-    state.audioSource.disconnect();
-    state.audioSource = null;
+  if (audioContext) {
+    audioContext.close().catch(() => {});
+    audioContext = null;
   }
-  if (state.audioAnalyser) {
-    state.audioAnalyser.disconnect();
-    state.audioAnalyser = null;
-  }
+  document.querySelectorAll(".wave-bar").forEach(bar => {
+    bar.style.transform = "scaleY(0.2)";
+  });
 }

@@ -40,8 +40,56 @@ export function renderSettings(container, switchViewCallback) {
           </select>
         </div>
 
+        <!-- MiniMax TTS & Voice Settings -->
+        <div class="form-group" style="background:var(--nested-bg-medium); padding:12px 14px; border-radius:8px; border:1px solid var(--card-border);">
+          <label style="color:var(--accent-cyan); font-weight:800; display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-volume-high"></i> 廣東話 TTS 語音引擎 (Cantonese Text-to-Speech Engine)
+          </label>
+          <select id="set-tts-engine" style="margin-top:6px;">
+            <option value="system" ${state.ttsEngine === 'system' ? 'selected' : ''}>系統原生 Web Speech API (預設：免費離線，自動性別音高校正)</option>
+            <option value="minimax-global" ${state.ttsEngine === 'minimax-global' ? 'selected' : ''}>MiniMax 廣東話超擬真 API (國際版 - api.minimaxi.chat ⭐)</option>
+            <option value="minimax-cn" ${state.ttsEngine === 'minimax-cn' ? 'selected' : ''}>MiniMax 廣東話超擬真 API (國內版 - api.minimax.chat ⭐)</option>
+          </select>
+          
+          <div id="minimax-config-panel" style="margin-top:10px; display:${state.ttsEngine !== 'system' ? 'flex' : 'none'}; flex-direction:column; gap:10px; border-top:1px dashed var(--card-border); padding-top:10px;">
+            <div>
+              <label style="font-size:0.75rem; color:var(--text-bright);">MiniMax API Key (金鑰)</label>
+              <input type="password" id="set-minimax-key" value="${state.minimaxApiKey || ''}" placeholder="輸入 MiniMax API Key (eyJ...)" style="margin-top:2px; font-size:0.8rem;" />
+            </div>
+
+            <div>
+              <label style="font-size:0.75rem; color:var(--text-bright);">MiniMax Group ID (用戶組 ID)</label>
+              <input type="text" id="set-minimax-group" value="${state.minimaxGroupId || ''}" placeholder="輸入 MiniMax Group ID (如: 18123456789)" style="margin-top:2px; font-size:0.8rem;" />
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+              <div>
+                <label style="font-size:0.72rem; color:var(--text-bright);">男案主廣東話音色 (Male Timbre)</label>
+                <select id="set-minimax-male" style="font-size:0.75rem; margin-top:2px;">
+                  <option value="cantonese_male" ${state.minimaxMaleTimbre === 'cantonese_male' ? 'selected' : ''}>cantonese_male (標準廣東話男聲)</option>
+                  <option value="male-qn-qingse" ${state.minimaxMaleTimbre === 'male-qn-qingse' ? 'selected' : ''}>male-qn-qingse (青澀青年男聲)</option>
+                  <option value="male-qn-jingying" ${state.minimaxMaleTimbre === 'male-qn-jingying' ? 'selected' : ''}>male-qn-jingying (精英沉穩男聲)</option>
+                  <option value="presenter_male" ${state.minimaxMaleTimbre === 'presenter_male' ? 'selected' : ''}>presenter_male (播音員男聲)</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:0.72rem; color:var(--text-bright);">女案主廣東話音色 (Female Timbre)</label>
+                <select id="set-minimax-female" style="font-size:0.75rem; margin-top:2px;">
+                  <option value="cantonese_female" ${state.minimaxFemaleTimbre === 'cantonese_female' ? 'selected' : ''}>cantonese_female (標準廣東話女聲)</option>
+                  <option value="female-shaonv" ${state.minimaxFemaleTimbre === 'female-shaonv' ? 'selected' : ''}>female-shaonv (溫柔少女女聲)</option>
+                  <option value="female-yujie" ${state.minimaxFemaleTimbre === 'female-yujie' ? 'selected' : ''}>female-yujie (御姐成熟女聲)</option>
+                  <option value="presenter_female" ${state.minimaxFemaleTimbre === 'presenter_female' ? 'selected' : ''}>presenter_female (播音員女聲)</option>
+                </select>
+              </div>
+            </div>
+            <p style="font-size:0.7rem; color:var(--text-muted);">
+              💡 系統會根據案主性別 ("男" vs "女") 自動切換相應的 MiniMax 廣東話音色。若連線失敗將自動 Fallback 至系統原生語音。
+            </p>
+          </div>
+        </div>
+
         <div class="form-group">
-          <label>廣東話 TTS 語音朗讀聲音選擇 (Cantonese Voice)</label>
+          <label>系統原生廣東話 TTS 聲音選擇 (System Native Voice)</label>
           <select id="set-voice">
             <option value="">預設系統廣東話聲音 (Auto HK Voice)</option>
             ${state.voices.filter(v => v.lang === "zh-HK" || v.lang === "zh-Hant-HK" || v.name.toLowerCase().includes("hong kong")).map(v => `
@@ -49,7 +97,7 @@ export function renderSettings(container, switchViewCallback) {
             `).join("")}
           </select>
           <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
-            📢 語音播放完全使用設備原生提供的 TTS 合成。如果下拉列表中沒有出現更多廣東話聲音，可於設備操作系統的「輔助功能 / 語音朗讀」中下載額外的廣東話高品質包（如 macOS 的 Sin-Ji 語音）。
+            📢 使用系統原生語音時，系統已啟用男個案音高校正鎖（將女性音色自動降調為男音）。
           </p>
         </div>
 
@@ -105,6 +153,14 @@ export function renderSettings(container, switchViewCallback) {
     </div>
   `;
 
+  const ttsEngineSelect = document.getElementById("set-tts-engine");
+  const minimaxPanel = document.getElementById("minimax-config-panel");
+  if (ttsEngineSelect && minimaxPanel) {
+    ttsEngineSelect.addEventListener("change", (e) => {
+      minimaxPanel.style.display = e.target.value !== "system" ? "flex" : "none";
+    });
+  }
+
   const form = document.getElementById("settings-form");
   form.addEventListener("submit", (e) => {
     e.preventDefault();
@@ -115,11 +171,23 @@ export function renderSettings(container, switchViewCallback) {
     const voice = document.getElementById("set-voice").value;
     const recLang = document.getElementById("set-rec-lang").value;
 
+    const ttsEngine = document.getElementById("set-tts-engine").value;
+    const minimaxKey = document.getElementById("set-minimax-key").value.trim();
+    const minimaxGroup = document.getElementById("set-minimax-group").value.trim();
+    const minimaxMale = document.getElementById("set-minimax-male").value;
+    const minimaxFemale = document.getElementById("set-minimax-female").value;
+
     state.userName = userName;
     state.apiKey = key;
     state.selectedModel = model;
     state.selectedVoiceName = voice;
     state.recognitionLang = recLang;
+
+    state.ttsEngine = ttsEngine;
+    state.minimaxApiKey = minimaxKey;
+    state.minimaxGroupId = minimaxGroup;
+    state.minimaxMaleTimbre = minimaxMale;
+    state.minimaxFemaleTimbre = minimaxFemale;
 
     localStorage.setItem("rehab_user_name", userName);
     localStorage.setItem("rehab_gemini_api_key", key);
@@ -127,9 +195,16 @@ export function renderSettings(container, switchViewCallback) {
     localStorage.setItem("rehab_selected_voice", voice);
     localStorage.setItem("rehab_recognition_lang", recLang);
 
+    localStorage.setItem("rehab_tts_engine", ttsEngine);
+    localStorage.setItem("rehab_minimax_api_key", minimaxKey);
+    localStorage.setItem("rehab_minimax_group_id", minimaxGroup);
+    localStorage.setItem("rehab_minimax_male_timbre", minimaxMale);
+    localStorage.setItem("rehab_minimax_female_timbre", minimaxFemale);
+
     updateStaticUIStrings();
     updateApiBadge();
-    alert("設定儲存成功！");
+    AudioSynth.playSuccess();
+    alert("設定儲存成功！已更新廣東話 TTS 語音引擎與性別音色配置。");
     
     if (typeof switchViewCallback === "function") switchViewCallback("dashboard");
   });
