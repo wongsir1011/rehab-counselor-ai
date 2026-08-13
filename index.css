@@ -3392,7 +3392,449 @@ body {
   transform: translateY(0.5px) !important;
 }
 
+/* ==========================================================================
+   Mobile layout: App shell, Case Arena, and Roleplay Room
+   ========================================================================== */
+@media (max-width: 768px) {
+  html {
+    overflow-x: hidden;
+  }
 
+  body {
+    padding-bottom: 74px;
+  }
+
+  .bg-glowing-blob {
+    width: 240px;
+    height: 240px;
+  }
+
+  .app-container {
+    display: block;
+    min-width: 0;
+  }
+
+  /* Keep every main destination reachable without sacrificing content width. */
+  .sidebar {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 74px;
+    padding: 6px;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 2px;
+    border-top: 1px solid var(--card-border);
+    border-right: 0;
+    z-index: 5000;
+  }
+
+  .sidebar > div:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .sidebar nav {
+    height: 100%;
+  }
+
+  .logo-section,
+  .user-widget {
+    display: none;
+  }
+
+  .nav-links {
+    height: 100%;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+  }
+
+  .nav-footer {
+    flex: 0 0 calc(100% / 6);
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    gap: 0;
+  }
+
+  .nav-item {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    padding: 5px 2px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    border-radius: 8px;
+    font-size: 0.56rem;
+    line-height: 1.1;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .nav-item i {
+    width: auto;
+    font-size: 1rem;
+  }
+
+  .main-wrapper {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    min-height: 100vh;
+    padding: 14px 14px 96px;
+    gap: 14px;
+  }
+
+  #content-view-mount {
+    min-width: 0;
+  }
+
+  .top-bar {
+    margin-bottom: 2px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .page-title h2 {
+    font-size: 1.35rem;
+    line-height: 1.25;
+  }
+
+  .page-title p {
+    margin-top: 4px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .action-controls {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .action-controls .tag {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .glass-card {
+    padding: 16px;
+  }
+
+  /* Case Arena mode selector and search controls. */
+  .arena-mode-switcher {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+    margin-bottom: 16px !important;
+  }
+
+  .arena-mode-switcher .btn {
+    width: 100%;
+    min-height: 48px;
+    padding: 10px 12px !important;
+    justify-content: center;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  .dossier-search-wrapper {
+    padding: 12px !important;
+    margin-bottom: 16px;
+  }
+
+  .dossier-search-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px !important;
+  }
+
+  .dossier-search-inner {
+    min-width: 0 !important;
+  }
+
+  .dossier-search-input {
+    min-height: 46px;
+    padding-top: 11px;
+    padding-bottom: 11px;
+    font-size: 0.88rem;
+  }
+
+  .cyber-filters-toggle {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 0;
+    justify-content: space-between;
+  }
+
+  .cyber-filters-panel.open {
+    max-height: 560px;
+    margin-top: 10px;
+    padding: 12px;
+  }
+
+  .cyber-filter-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .cyber-filter-select {
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .dossier-filter-tabs {
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+    padding: 2px 1px 8px;
+  }
+
+  .dossier-filter-badge {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 7px 12px;
+  }
+
+  /* One readable dossier per row, with touch-sized controls. */
+  .dossier-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .dossier-card {
+    min-width: 0;
+    padding: 16px;
+    gap: 12px;
+    border-left-width: 4px;
+  }
+
+  .dossier-card:hover,
+  .dossier-card.mobile-touch-hover {
+    transform: none !important;
+  }
+
+  .dossier-card .dossier-avatar-container,
+  .dossier-card .dossier-badge-glow,
+  .dossier-card .dossier-title,
+  .dossier-card .dossier-diag,
+  .dossier-card .dossier-tech-table,
+  .dossier-card .btn,
+  .dossier-card .btn-share-case,
+  .dossier-card .dossier-tag-custom {
+    transform: none;
+  }
+
+  .dossier-avatar-container {
+    width: 50px;
+    height: 50px;
+    font-size: 1.85rem;
+  }
+
+  .dossier-title {
+    font-size: 1.15rem;
+  }
+
+  .dossier-diag {
+    align-items: flex-start;
+    margin-bottom: 8px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+
+  .dossier-tech-table tr {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .dossier-tech-table td {
+    min-width: 0;
+    padding: 7px 0;
+    overflow-wrap: anywhere;
+  }
+
+  .dossier-tech-table td.label-cell {
+    width: auto;
+  }
+
+  .dossier-card-actions {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) !important;
+  }
+
+  .dossier-card-actions .btn,
+  .dossier-card > .btn-share-case {
+    min-height: 44px;
+    padding-right: 8px !important;
+    padding-left: 8px !important;
+    line-height: 1.25;
+    white-space: normal;
+  }
+
+  /* The simulator becomes a vertical workflow instead of a squeezed split view. */
+  .roleplay-room {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr) !important;
+    height: auto !important;
+    overflow: visible !important;
+    gap: 16px !important;
+  }
+
+  .dialogue-panel {
+    width: 100%;
+    height: calc(100svh - 220px);
+    min-height: 540px;
+    max-height: 720px;
+  }
+
+  .dialogue-panel > div:first-child {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px !important;
+  }
+
+  .speech-control-toggle {
+    margin-left: auto;
+  }
+
+  #rp-chrome-stt-banner {
+    flex-wrap: wrap;
+  }
+
+  #rp-chrome-fix-btn {
+    width: 100%;
+    margin-left: 0 !important;
+    justify-content: center;
+  }
+
+  .dialogue-history {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .chat-bubble {
+    max-width: 92%;
+    padding: 12px 14px;
+  }
+
+  .voice-input-container {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .voice-wave-hud {
+    flex: 1 1 120px;
+  }
+
+  #rp-voice-status-text {
+    flex: 1 0 100%;
+  }
+
+  #rp-empathy-hud > span:last-child {
+    display: none;
+  }
+
+  .input-console {
+    gap: 8px;
+    padding: 7px 8px;
+  }
+
+  .input-console input {
+    min-width: 0;
+    padding: 7px 5px;
+    font-size: 0.88rem;
+  }
+
+  .input-console .btn {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .coach-sidebar {
+    width: 100%;
+    height: auto;
+    gap: 12px;
+  }
+
+  .coach-sidebar > .glass-card {
+    flex: none !important;
+    overflow: visible !important;
+  }
+
+  .notes-textarea {
+    height: 180px;
+    min-height: 180px;
+    resize: vertical;
+  }
+
+  .coach-sidebar > div:last-child {
+    grid-template-columns: 1fr !important;
+  }
+
+  .coach-sidebar > div:last-child .btn {
+    width: 100%;
+    min-height: 46px;
+    justify-content: center;
+  }
+
+  .soap-assistant-drawer {
+    position: fixed;
+    top: 12px;
+    right: 8px;
+    bottom: 84px;
+    width: calc(100vw - 56px);
+    max-width: 350px;
+    transform: translateX(calc(100% + 8px));
+  }
+
+  .soap-drawer-toggle {
+    left: -40px;
+    width: 40px;
+  }
+}
+
+@media (max-width: 420px) {
+  .main-wrapper {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .nav-item {
+    font-size: 0.5rem;
+  }
+
+  .nav-item i {
+    font-size: 0.95rem;
+  }
+
+  .dossier-card-actions {
+    grid-template-columns: 1fr !important;
+  }
+
+  .dossier-card-actions .btn {
+    width: 100%;
+  }
+
+  .speech-control-toggle {
+    width: 100%;
+    margin-left: 0;
+    justify-content: center;
+  }
+
+  .notes-save-indicator .save-status-text {
+    display: none;
+  }
+}
 
 
 

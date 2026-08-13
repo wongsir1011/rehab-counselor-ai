@@ -1,7 +1,7 @@
 // RehabCounselor AI - 主應用控制器 (Vanilla SPA Engine)
 
-import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260602_v12";
-import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260602_v12";
+import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260724_v13_1";
+import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260724_v13_1";
 
 // Global App State
 const state = {
@@ -421,6 +421,7 @@ function switchView(viewName) {
 
   // Play audio synth click
   AudioSynth.playClick();
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
 
   switch(viewName) {
     case "dashboard":
@@ -2162,7 +2163,7 @@ function getICFCategoryChineseName(category) {
 function renderCaseArena(container) {
   container.innerHTML = `
     <!-- Top Selector Tabs -->
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:24px;">
+    <div class="arena-mode-switcher" style="display:grid; grid-template-columns: 1fr 1fr; gap:16px; margin-bottom:24px;">
       <button class="btn btn-primary" id="view-cases-catalog-btn" style="justify-content:center; padding:14px;"><i class="fa-solid fa-folder-open"></i> ${state.locale === "en" ? "Browse Case Catalog (Dossier Lobby)" : "瀏覽經典復康個案庫 (Dossier Lobby)"}</button>
       <button class="btn" id="view-case-generator-btn" style="justify-content:center; padding:14px;"><i class="fa-solid fa-wand-magic-sparkles"></i> ${state.locale === "en" ? "AI Case Synthesizer (Bio-Gen Pod)" : "AI 智能個案產生器 (Bio-Gen Pod)"}</button>
     </div>
@@ -2204,7 +2205,7 @@ function renderCaseCatalog(container) {
   container.innerHTML = `
     <!-- High-Tech Dossier Lobby Controls -->
     <div class="dossier-search-wrapper" style="display:flex; flex-direction:column; gap:12px;">
-      <div style="display:flex; gap:16px; align-items:center; width:100%; flex-wrap:wrap;">
+      <div class="dossier-search-row" style="display:flex; gap:16px; align-items:center; width:100%; flex-wrap:wrap;">
         <div class="dossier-search-inner" style="flex-grow:1; min-width:280px;">
           <i class="fa-solid fa-magnifying-glass"></i>
           <input type="text" class="dossier-search-input" id="dossier-search-box" placeholder="${state.locale === 'en' ? 'Search case name, job, or condition...' : '搜尋個案姓名、前職或疾病診斷特徵...'}" />
@@ -2419,7 +2420,7 @@ function renderCaseCatalog(container) {
             </table>
           </div>
 
-          <div style="display:grid; grid-template-columns: 1.1fr 0.9fr; gap:10px; margin-top:8px; transform-style: preserve-3d;">
+          <div class="dossier-card-actions" style="display:grid; grid-template-columns: 1.1fr 0.9fr; gap:10px; margin-top:8px; transform-style: preserve-3d;">
             <button class="btn btn-primary start-roleplay-trigger" data-case="${c.id}" style="padding: 10px 4px; justify-content: center; font-size: 0.8rem;">
               <i class="fa-solid fa-comments"></i> 語音對話模擬
             </button>
@@ -3078,6 +3079,7 @@ function startRoleplaySession(selectedCase) {
   };
   
   state.activeView = "roleplay";
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   
   const title = document.getElementById("view-title");
   const subtitle = document.getElementById("view-subtitle");
@@ -6191,5 +6193,3 @@ function initSoapAssistantDrawer() {
     }, 2000);
   });
 }
-
-
