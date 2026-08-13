@@ -1,6 +1,7 @@
 // RehabCounselor AI - Core State & Persistence Module
 
-import { MOCK_CASES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "../../mockData.js";
+import { MOCK_CASES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "../data/mockData.js";
+import { RehabCounselorDB } from "../utils/db.js";
 
 export const state = {
   activeView: "dashboard",
@@ -21,19 +22,18 @@ export const state = {
     return [...MOCK_CASES];
   })(),
   activeCase: null,
-  activeSession: null, // { history: [], notes: { soap: "", icf: "" }, report: null }
+  activeSession: null,
   miGameScore: 0,
   miGameIndex: 0,
   activeTheoryTab: "act",
-  activeTheorySubTab: "info", // "info", "flashcards", "test"
+  activeTheorySubTab: "info",
   activeHexaNode: "acceptance",
   voices: [],
   selectedVoiceName: localStorage.getItem("rehab_selected_voice") || "",
-  quoteIntervalId: null,   // 追蹤激勵金句定時器
-  mysteryTimeoutId: null,   // 追蹤盲盒轉場定時器
-  activeUtterance: null,   // 追蹤當前活動朗讀實體
+  quoteIntervalId: null,
+  mysteryTimeoutId: null,
+  activeUtterance: null,
   
-  // Phase 4: Local Storage and STT State
   unlockedAchievements: JSON.parse(localStorage.getItem("rehab_unlocked_achievements")) || [],
   completedCasesCount: parseInt(localStorage.getItem("rehab_completed_cases_count")) || 0,
   completedCaseIds: JSON.parse(localStorage.getItem("rehab_completed_case_ids")) || [],
@@ -60,6 +60,21 @@ export const state = {
     };
   })()
 };
+
+/**
+ * 初始化本地 IndexedDB 持久化資料庫與資料搬遷
+ */
+export async function initPersistenceDB() {
+  try {
+    await RehabCounselorDB.migrateFromLocalStorage();
+    const customCases = await RehabCounselorDB.getAllCustomCases();
+    if (customCases.length > 0) {
+      state.cases = [...customCases, ...MOCK_CASES.filter(mc => !customCases.some(cc => cc.id === mc.id))];
+    }
+  } catch (err) {
+    console.warn("initPersistenceDB warning:", err);
+  }
+}
 
 /**
  * 國際化語系字串翻譯輔助函式

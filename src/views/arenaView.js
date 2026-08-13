@@ -1,10 +1,9 @@
-// RehabCounselor AI - Case Arena View Component (Catalog, Generator, Simulator Chat Room)
-
 import { state, checkAndUnlockAchievements } from "../core/state.js";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateSoapSuggestions } from "../services/geminiService.js";
 import { speakCantonese, initVoiceRecognition, stopRecording } from "../core/speechEngine.js";
 import { AudioSynth } from "../core/audioSynth.js";
 import { exportSessionReport, triggerConfetti } from "../components/modals.js";
+import { RehabCounselorDB } from "../utils/db.js";
 
 export function renderCaseArena(container, switchViewCallback) {
   container.innerHTML = `
@@ -347,6 +346,7 @@ export function renderCaseGenerator(container, switchViewCallback) {
       try {
         const generatedOnly = state.cases.filter(c => c.id.startsWith("generated_") || c.id.startsWith("custom_"));
         localStorage.setItem("rehab_custom_cases", JSON.stringify(generatedOnly));
+        RehabCounselorDB.saveCustomCase(customCase);
       } catch (e) {}
 
       AudioSynth.playSuccess();
@@ -1008,6 +1008,7 @@ export async function endRoleplaySession(switchViewCallback) {
     }
     historySessions.unshift(completedSession);
     localStorage.setItem("rehab_sessions_history", JSON.stringify(historySessions));
+    RehabCounselorDB.saveSession(completedSession);
 
     AudioSynth.playSuccess();
     

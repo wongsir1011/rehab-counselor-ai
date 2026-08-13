@@ -1,6 +1,6 @@
 // RehabCounselor AI - Navigation Router & App State Initialization
 
-import { state, t } from "./state.js";
+import { state, t, initPersistenceDB } from "./state.js";
 import { AudioSynth } from "./audioSynth.js";
 import { initSpeechEngine, stopRecording } from "./speechEngine.js";
 import { renderDashboard } from "../views/dashboardView.js";
@@ -26,6 +26,7 @@ export function initApp() {
     }
   }
 
+  initPersistenceDB();
   initLocaleAndSound();
   updateStaticUIStrings();
   updateApiBadge();

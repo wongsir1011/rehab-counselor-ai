@@ -4,6 +4,8 @@ import { state } from "../core/state.js";
 import { MOCK_CASES, MOCK_ACHIEVEMENTS } from "../data/mockData.js";
 import { AudioSynth } from "../core/audioSynth.js";
 import { updateStaticUIStrings, updateApiBadge } from "../core/router.js";
+import { RehabCounselorDB } from "../utils/db.js";
+import { downloadFile, readTextFile } from "../utils/exportUtils.js";
 
 export function renderSettings(container, switchViewCallback) {
   container.innerHTML = `
@@ -66,6 +68,28 @@ export function renderSettings(container, switchViewCallback) {
         </div>
       </form>
 
+      <!-- Backup & Restore Data Management Section -->
+      <div style="border-top: 1px solid var(--card-border); margin-top: 20px; padding-top: 20px;">
+        <h4 style="font-size:0.88rem; font-weight:800; color:var(--accent-cyan); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <i class="fa-solid fa-database"></i> 全站資料備份與還原 (Data Backup & Restore)
+        </h4>
+        <p style="font-size:0.75rem; color:var(--text-muted); line-height:1.4; margin-bottom:12px;">
+          💾 同工換電腦或裝置時，可將全站的所有模擬對話歷程、評估報告、自訂個案與成就解鎖進度匯出為備份檔，並於新裝置一鍵還原。
+        </p>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+          <button id="backup-export-btn" type="button" class="btn btn-cyan" style="justify-content:center; padding:10px; font-size:0.8rem;">
+            <i class="fa-solid fa-download"></i> 匯出備份 (.json)
+          </button>
+          
+          <label for="backup-import-file" class="btn btn-purple" style="justify-content:center; padding:10px; font-size:0.8rem; cursor:pointer; margin:0;">
+            <i class="fa-solid fa-upload"></i> 匯入備份檔
+          </label>
+          <input type="file" id="backup-import-file" accept=".json" style="display:none;" />
+        </div>
+      </div>
+
+      <!-- Danger Zone Section -->
       <div style="border-top: 1px solid var(--card-border); margin-top: 20px; padding-top: 20px;">
         <h4 style="font-size:0.88rem; font-weight:800; color:var(--accent-red); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
           <i class="fa-solid fa-triangle-exclamation"></i> 危險區域 (Danger Zone)
@@ -110,9 +134,63 @@ export function renderSettings(container, switchViewCallback) {
     if (typeof switchViewCallback === "function") switchViewCallback("dashboard");
   });
 
+  // Attach Export Backup Listener
+  const exportBtn = document.getElementById("backup-export-btn");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", async () => {
+      AudioSynth.playClick();
+      try {
+        const jsonStr = await RehabCounselorDB.exportFullBackupJSON();
+        const dateTag = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        const filename = `RehabCounselor_Backup_${dateTag}.json`;
+        downloadFile(filename, jsonStr, "application/json");
+        AudioSynth.playSuccess();
+      } catch (err) {
+        AudioSynth.playError();
+        alert(`匯出備份失敗：${err.message}`);
+      }
+    });
+  }
+
+  // Attach Import Backup Listener
+  const importFileInput = document.getElementById("backup-import-file");
+  if (importFileInput) {
+    importFileInput.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (!confirm("⚠️ 匯入備份檔將會覆寫目前的進度與紀錄，確定要繼續嗎？")) {
+        importFileInput.value = "";
+        return;
+      }
+
+      AudioSynth.playClick();
+      try {
+        const jsonStr = await readTextFile(file);
+        await RehabCounselorDB.importFullBackupJSON(jsonStr);
+        
+        AudioSynth.playUnlock();
+        alert("🎉 全站備份資料還原成功！系統即將刷新視圖。");
+
+        const customCases = await RehabCounselorDB.getAllCustomCases();
+        if (customCases.length > 0) {
+          state.cases = [...customCases, ...MOCK_CASES.filter(mc => !customCases.some(cc => cc.id === mc.id))];
+        }
+
+        updateStaticUIStrings();
+        if (typeof switchViewCallback === "function") switchViewCallback("dashboard");
+      } catch (err) {
+        AudioSynth.playError();
+        alert(`匯入備份失敗：${err.message}`);
+      } finally {
+        importFileInput.value = "";
+      }
+    });
+  }
+
   const resetBtn = document.getElementById("rp-reset-progress-btn");
   if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
+    resetBtn.addEventListener("click", async () => {
       if (!confirm("⚠️ 同工，你確定要清除所有的學習進度嗎？\n此操作將會清除所有歷史對話報告、自定義個案與成就徽章，且不可還原！")) {
         return;
       }
@@ -121,6 +199,8 @@ export function renderSettings(container, switchViewCallback) {
       }
 
       AudioSynth.playWarning();
+
+      await RehabCounselorDB.clearAll();
 
       localStorage.removeItem("rehab_sessions_history");
       localStorage.removeItem("rehab_custom_cases");

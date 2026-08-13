@@ -2,6 +2,7 @@
 
 import { state } from "../core/state.js";
 import { AudioSynth } from "../core/audioSynth.js";
+import { copyToCMSClipboard } from "../utils/exportUtils.js";
 
 export function showSessionDetailPopup(session, onExportCallback) {
   AudioSynth.playClick();
@@ -135,8 +136,9 @@ export function showSessionDetailPopup(session, onExportCallback) {
         </div>
 
       </div>
-      <div class="popup-footer">
-        <button class="btn btn-cyan" id="popup-export-btn" style="margin-right:10px;"><i class="fa-solid fa-download"></i> ${state.locale === "en" ? "Export Report" : "匯出報告"}</button>
+      <div class="popup-footer" style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn btn-purple" id="popup-copy-cms-btn"><i class="fa-solid fa-copy"></i> 複製至社工系統 (CMS)</button>
+        <button class="btn btn-cyan" id="popup-export-btn"><i class="fa-solid fa-download"></i> ${state.locale === "en" ? "Export Report" : "匯出報告"}</button>
         <button class="btn" id="popup-close-confirm-btn">${state.locale === "en" ? "Close" : "關閉"}</button>
       </div>
     </div>
@@ -162,6 +164,10 @@ export function showSessionDetailPopup(session, onExportCallback) {
   tabReport.addEventListener("click", () => switchPopupTab(tabReport, contentReport));
   tabTranscript.addEventListener("click", () => switchPopupTab(tabTranscript, contentTranscript));
   tabNotes.addEventListener("click", () => switchPopupTab(tabNotes, contentNotes));
+
+  overlay.querySelector("#popup-copy-cms-btn").addEventListener("click", () => {
+    copyToCMSClipboard(session);
+  });
 
   overlay.querySelector("#popup-export-btn").addEventListener("click", () => {
     AudioSynth.playClick();
@@ -197,7 +203,6 @@ export function showAchievementToast(ach) {
   document.body.appendChild(toast);
 
   setTimeout(() => toast.classList.add("show"), 100);
-
   triggerConfettiAtCenter();
 
   setTimeout(() => {
@@ -206,27 +211,32 @@ export function showAchievementToast(ach) {
   }, 4500);
 }
 
-export function triggerConfetti(x, y) {
-  const colors = ["#ff6b6b", "#4dadf7", "#51cf66", "#fcc419", "#ae3ec9", "#20c997", "#06b6d4"];
-  const parent = document.body;
-  
-  for (let i = 0; i < 30; i++) {
+export function triggerConfetti() {
+  for (let i = 0; i < 40; i++) {
     const p = document.createElement("div");
     p.className = "particle-dot";
-    p.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
-    p.style.left = `${x}px`;
-    p.style.top = `${y}px`;
+    const colors = ["var(--accent-purple)", "var(--accent-cyan)", "var(--accent-green)", "var(--accent-amber)", "var(--accent-rose)"];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    p.style.backgroundColor = color;
+    p.style.boxShadow = `0 0 6px ${color}`;
+    p.style.left = `${Math.random() * 100}vw`;
+    p.style.top = `-10px`;
     
-    const angle = Math.random() * Math.PI * 2;
-    const velocity = 40 + Math.random() * 70;
-    const dx = Math.cos(angle) * velocity;
-    const dy = Math.sin(angle) * velocity - 25;
+    document.body.appendChild(p);
+
+    const speed = 1 + Math.random() * 3;
+    let y = 0;
     
-    p.style.setProperty("--dx", `${dx}px`);
-    p.style.setProperty("--dy", `${dy}px`);
-    
-    parent.appendChild(p);
-    setTimeout(() => p.remove(), 1200);
+    function fall() {
+      y += speed;
+      p.style.top = `${y}px`;
+      if (y < window.innerHeight) {
+        requestAnimationFrame(fall);
+      } else {
+        p.remove();
+      }
+    }
+    fall();
   }
 }
 
@@ -275,53 +285,42 @@ export function triggerConfettiAtCenter() {
         p.remove();
       }
     }
-    
-    updateParticle();
+    requestAnimationFrame(updateParticle);
   }
 }
 
-export function runDecryptionAnimation(elementId, finalStr, delayMs = 12) {
-  const el = document.getElementById(elementId);
-  if (!el) return Promise.resolve();
+export function runDecryptionAnimation(element, targetText, duration = 800) {
+  const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?";
+  const length = targetText.length;
+  let index = 0;
   
-  const chars = "XYZ019864275$%&#@§*+=?[]{}<>";
-  const len = finalStr.length;
-  el.innerHTML = "";
+  const intervalTime = 30;
+  const stepsPerChar = Math.max(1, Math.floor(duration / (length * intervalTime)));
   
-  const spans = [];
-  for (let i = 0; i < len; i++) {
-    const s = document.createElement("span");
-    s.className = "decrypted-char decrypting-active";
-    s.textContent = chars[Math.floor(Math.random() * chars.length)];
-    el.appendChild(s);
-    spans.push(s);
-  }
-  
-  const cursor = document.createElement("span");
-  cursor.className = "decryption-cursor";
-  el.appendChild(cursor);
-
   return new Promise((resolve) => {
-    let index = 0;
+    let currentStep = 0;
     
     function decryptNextChar() {
-      if (index >= len) {
-        if (cursor.parentNode) cursor.remove();
+      if (index >= length) {
+        element.textContent = targetText;
         resolve();
         return;
       }
       
-      spans[index].textContent = finalStr[index];
-      spans[index].classList.remove("decrypting-active");
-      
-      for (let j = index + 1; j < len; j++) {
-        if (Math.random() > 0.45) {
-          spans[j].textContent = chars[Math.floor(Math.random() * chars.length)];
-        }
+      let scrambled = targetText.substring(0, index);
+      for (let i = index; i < length; i++) {
+        scrambled += charset[Math.floor(Math.random() * charset.length)];
       }
       
-      index++;
-      setTimeout(decryptNextChar, delayMs);
+      element.textContent = scrambled;
+      
+      currentStep++;
+      if (currentStep >= stepsPerChar) {
+        currentStep = 0;
+        index++;
+      }
+      
+      setTimeout(decryptNextChar, intervalTime);
     }
     
     decryptNextChar();
