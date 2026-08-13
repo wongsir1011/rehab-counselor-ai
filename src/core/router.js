@@ -3,6 +3,7 @@
 import { state, t, initPersistenceDB } from "./state.js";
 import { AudioSynth } from "./audioSynth.js";
 import { initSpeechEngine, stopRecording } from "./speechEngine.js";
+import { initGlobalHotkeys } from "./hotkeys.js";
 import { renderDashboard } from "../views/dashboardView.js";
 import { renderTheoryHub } from "../views/theoryView.js";
 import { renderCaseArena, startRoleplaySession } from "../views/arenaView.js";
@@ -33,6 +34,7 @@ export function initApp() {
   initNavigation();
   initThemeToggle();
   initSpeechEngine();
+  initGlobalHotkeys();
 
   switchView("dashboard");
 }

@@ -430,8 +430,8 @@ export function startRoleplaySession(selectedCase, switchViewCallback) {
           </div>
 
           <div class="input-console" id="rp-input-console-bar">
-            <input type="text" id="rp-text-input" placeholder="輸入你想對案主說的話... 或點擊上方🎙️說話" />
-            <button class="btn btn-primary" id="rp-send-btn"><i class="fa-solid fa-paper-plane"></i></button>
+            <input type="text" id="rp-text-input" placeholder="輸入你想對案主說的話... 或點擊上方🎙️說話 (Cmd+Enter 快速發送)" />
+            <button class="btn btn-primary" id="rp-send-btn" title="快速發送 (Cmd+Enter / Ctrl+Enter)"><i class="fa-solid fa-paper-plane"></i></button>
           </div>
         </div>
       </div>
