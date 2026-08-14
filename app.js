@@ -3695,57 +3695,85 @@ function hexToUint8Array(hexString) {
  * MiniMax 廣東話神經語音合成 API (REST API v2)
  */
 async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false) {
-  const baseUrl = isCn ? "https://api.minimaxi.chat/v1/t2a_v2" : "https://api.minimax.chat/v1/t2a_v2";
-  const url = groupId ? `${baseUrl}?GroupId=${encodeURIComponent(groupId)}` : baseUrl;
-  
-  const payload = {
-    model: "speech-01-turbo",
-    text: text,
-    stream: false,
-    voice_setting: {
-      voice_id: voiceId || "cantonese_male",
-      speed: 1.0,
-      vol: 1.0,
-      pitch: 0
-    },
-    audio_setting: {
-      sample_rate: 32000,
-      bitrate: 128000,
-      format: "mp3",
-      channel: 1
+  const cleanKey = (apiKey || "").replace(/^Bearer\s+/i, "").trim();
+  const cleanGroupId = (groupId || "").trim();
+
+  if (!cleanKey) {
+    throw new Error("未提供 MiniMax API Key");
+  }
+
+  const primaryBase = isCn ? "https://api.minimaxi.chat/v1/t2a_v2" : "https://api.minimax.chat/v1/t2a_v2";
+  const alternateBase = isCn ? "https://api.minimax.chat/v1/t2a_v2" : "https://api.minimaxi.chat/v1/t2a_v2";
+
+  async function callEndpoint(baseUrl) {
+    const url = cleanGroupId ? `${baseUrl}?GroupId=${encodeURIComponent(cleanGroupId)}` : baseUrl;
+    
+    const payload = {
+      model: "speech-01-turbo",
+      text: text,
+      stream: false,
+      voice_setting: {
+        voice_id: voiceId || "cantonese_male",
+        speed: 1.0,
+        vol: 1.0,
+        pitch: 0
+      },
+      audio_setting: {
+        sample_rate: 32000,
+        bitrate: 128000,
+        format: "mp3",
+        channel: 1
+      }
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${cleanKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`MiniMax HTTP ${response.status}: ${errText}`);
     }
-  };
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+    const result = await response.json();
+    if (result.base_resp && result.base_resp.status_code !== 0) {
+      const err = new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
+      err.code = result.base_resp.status_code;
+      throw err;
+    }
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`MiniMax API HTTP ${response.status}: ${errText}`);
+    if (!result.data || !result.data.audio) {
+      throw new Error("MiniMax API 未返回音訊數據");
+    }
+
+    const audioBytes = hexToUint8Array(result.data.audio);
+    if (!audioBytes) {
+      throw new Error("MiniMax 音訊數據解碼失敗");
+    }
+
+    const blob = new Blob([audioBytes], { type: "audio/mp3" });
+    return URL.createObjectURL(blob);
   }
 
-  const result = await response.json();
-  if (result.base_resp && result.base_resp.status_code !== 0) {
-    throw new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
+  try {
+    return await callEndpoint(primaryBase);
+  } catch (err) {
+    // 若因 2049 (無效金鑰) 失敗，自動嘗試另一個節點（容錯用戶誤選了國際版/國內版）
+    if (err.code === 2049) {
+      try {
+        console.warn("MiniMax 首選節點返回 2049，正在自動嘗試備用節點...");
+        return await callEndpoint(alternateBase);
+      } catch (fallbackErr) {
+        throw new Error(`MiniMax (2049 無效金鑰)：請檢查是否選錯了【國內版 / 國際版】，或確認 Group ID 與 API Key 是否匹配。`);
+      }
+    }
+    throw err;
   }
-
-  if (!result.data || !result.data.audio) {
-    throw new Error("MiniMax API did not return audio payload");
-  }
-
-  const audioBytes = hexToUint8Array(result.data.audio);
-  if (!audioBytes) {
-    throw new Error("Failed to decode MiniMax audio bytes");
-  }
-
-  const blob = new Blob([audioBytes], { type: "audio/mp3" });
-  return URL.createObjectURL(blob);
 }
 
 /**
