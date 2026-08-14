@@ -2,7 +2,7 @@ import { state, checkAndUnlockAchievements } from "../core/state.js";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateSoapSuggestions } from "../services/geminiService.js";
 import { speakCantonese, initVoiceRecognition, stopRecording } from "../core/speechEngine.js";
 import { AudioSynth } from "../core/audioSynth.js";
-import { exportSessionReport, triggerConfetti } from "../components/modals.js";
+import { exportSessionReport, triggerConfetti, runDecryptionAnimation } from "../components/modals.js";
 import { RehabCounselorDB } from "../utils/db.js";
 
 export function renderCaseArena(container, switchViewCallback) {
@@ -270,93 +270,462 @@ export function renderCaseCatalog(container, switchViewCallback) {
 
 export function renderCaseGenerator(container, switchViewCallback) {
   container.innerHTML = `
-    <div class="glass-card" style="max-width:680px; margin:0 auto; display:flex; flex-direction:column; gap:20px;">
-      <div style="border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-        <h3 style="font-size:1.3rem; font-weight:800; color:var(--text-bright); display:flex; align-items:center; gap:8px;">
-          <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--accent-purple);"></i> AI 智能個案產生器 (Bio-Gen Pod)
-        </h3>
-        <p style="font-size:0.85rem; color:var(--text-muted); margin-top:4px;">請選擇自訂訓練參數，Gemini AI 將為您合成一個高度擬真的香港本地殘疾/長期病患者職業復康個案。</p>
+    <div class="synthesis-pod-layout">
+      
+      <!-- Left Column: Gene Configuration Dials -->
+      <div class="synthesis-column">
+        <div class="glass-card" style="padding: 24px; position:relative; overflow:hidden;">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--card-border); padding-bottom:10px; margin-bottom:16px;">
+            <h3 style="font-size:1.15rem; font-weight:800; color:var(--text-bright); margin:0;">
+              <i class="fa-solid fa-microchip" style="color:var(--accent-purple); margin-right:6px;"></i> 自定義個案合成基因艙 (Bio-Gen Pod)
+            </h3>
+            <span class="lcd-digital-badge" style="font-size:0.7rem;">POD.v2.5</span>
+          </div>
+          
+          <p style="font-size:0.82rem; color:var(--text-muted); line-height:1.4; margin-bottom:20px;">
+            配置底層核心參數，結合 Google Gemini 智慧引擎，在數秒內模擬注入地道香港社會變量，合成包含全套 ICF 分類及港式抗拒對白之就業個案。
+          </p>
+
+          <!-- Import external gene code -->
+          <div style="background:var(--nested-bg-faint); border:1px dashed var(--card-border); border-radius:10px; padding:12px; margin-bottom:20px;">
+            <label style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:6px;"><i class="fa-solid fa-file-import"></i> 導入同工分享的基因碼</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="synthesis-import-code" placeholder="貼上複製的基因防偽碼..." style="flex-grow:1; background:var(--nested-bg-dark); border:1px solid var(--card-border); border-radius:6px; padding:6px 10px; font-size:0.78rem; color:var(--text-bright); outline:none;" />
+              <button class="btn btn-cyan" id="synthesis-import-btn" style="padding:6px 12px; font-size:0.75rem; white-space:nowrap;"><i class="fa-solid fa-arrow-down-left-from-top"></i> 導入寫入</button>
+            </div>
+          </div>
+
+          <form id="case-gen-form" class="synthesis-form" style="gap:18px;">
+            
+            <!-- 1. Disability Category Gene Slots -->
+            <div class="synthesis-group">
+              <label><i class="fa-solid fa-dna"></i> 1. 疾病與障礙基因插槽 (Disability Chip)</label>
+              
+              <div class="gene-slots-grid">
+                <div class="gene-slot-card active" data-value="肢體傷殘 (如肢體偏癱或脊髓損傷)">
+                  <i class="fa-solid fa-wheelchair"></i>
+                  <div>
+                    <div class="gene-slot-title">肢體傷殘</div>
+                    <div class="gene-slot-subtitle">肢體偏癱或結構受損</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="腦部損傷康復 (如中風、創傷性腦受損)">
+                  <i class="fa-solid fa-brain"></i>
+                  <div>
+                    <div class="gene-slot-title">中風腦損</div>
+                    <div class="gene-slot-subtitle">缺血性中風/認知受損</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="精神康復 (如重度抑鬱、精神分裂康復者)">
+                  <i class="fa-solid fa-hand-holding-heart"></i>
+                  <div>
+                    <div class="gene-slot-title">精神康復</div>
+                    <div class="gene-slot-subtitle">情緒障礙/精神症適應</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="神經發展障礙 (如自閉症 ASD、過動症 ADHD)">
+                  <i class="fa-solid fa-child-reaching"></i>
+                  <div>
+                    <div class="gene-slot-title">自閉譜系</div>
+                    <div class="gene-slot-subtitle">ASD社交障礙青年</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="慢性疾病 (如慢性疼痛、糖尿病或心臟病)">
+                  <i class="fa-solid fa-kit-medical"></i>
+                  <div>
+                    <div class="gene-slot-title">慢性疾病</div>
+                    <div class="gene-slot-subtitle">纖維肌痛症/慢性痛症</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="感官障礙 (如聽力損失、視力受損)">
+                  <i class="fa-solid fa-ear-deaf"></i>
+                  <div>
+                    <div class="gene-slot-title">感官障礙</div>
+                    <div class="gene-slot-subtitle">聽覺障礙/助聽器適應</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Age group custom Neon Slider -->
+            <div class="synthesis-group">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label><i class="fa-solid fa-calendar-days"></i> 2. 案主生命階段參數 (Age Stage)</label>
+                <span class="lcd-digital-badge" id="lcd-age-text">青年待業期 (20-29 歲)</span>
+              </div>
+              <input type="range" class="cyber-slider" id="gen-age-slider" min="1" max="3" value="1" />
+            </div>
+
+            <!-- 3. Motivation custom Neon Slider -->
+            <div class="synthesis-group">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label><i class="fa-solid fa-shield-halved"></i> 3. 心理逃避與動機強度 (ACT Motivation)</label>
+                <span class="lcd-digital-badge" id="lcd-motivation-text">極低動機 (抗拒與嚴重逃避期)</span>
+              </div>
+              <input type="range" class="cyber-slider" id="gen-motivation-slider" min="1" max="3" value="1" />
+            </div>
+
+            <!-- 4. Motivation Stage custom Neon Slider -->
+            <div class="synthesis-group">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label><i class="fa-solid fa-gauge-simple-high"></i> 4. 改變動機階段分期 (MI Stage)</label>
+                <span class="lcd-digital-badge" id="lcd-stage-text">意圖準備前階段 (拒絕就業)</span>
+              </div>
+              <input type="range" class="cyber-slider" id="gen-stage-slider" min="1" max="3" value="1" />
+            </div>
+
+            <div id="gen-error" style="display:none; color:var(--accent-rose); font-size:0.82rem; font-weight:600; background:rgba(244,63,94,0.06); padding:10px; border-radius:8px; border-left:3px solid var(--accent-rose); margin-top:8px;"></div>
+
+            <button type="submit" class="synthesis-btn-run" style="width:100%;">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> 啟動生命特徵合成艙 (Begin Synthesis)
+            </button>
+          </form>
+        </div>
       </div>
 
-      <div style="display:flex; flex-direction:column; gap:16px;">
-        <div>
-          <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">傷殘 / 疾病類別 (Disability Category)</label>
-          <select id="gen-disability" class="glass-select" style="width:100%; padding:10px; border-radius:8px; background:var(--nested-bg-darkest); color:var(--text-bright); border:1px solid var(--card-border);">
-            <option value="中風致肢體偏癱 (Stroke Hemiplegia)">中風致肢體偏癱 (Stroke Hemiplegia)</option>
-            <option value="工傷脊椎受損 (Spinal Cord Injury)">工傷脊椎受損 (Spinal Cord Injury)</option>
-            <option value="抑鬱及焦慮症 (Depression & Anxiety)">抑鬱及焦慮症 (Depression & Anxiety)</option>
-            <option value="自閉症譜系 (Autism Spectrum ASD)">自閉症譜系 (Autism Spectrum ASD)</option>
-            <option value="聽力障礙 (Hearing Impairment)">聽力障礙 (Hearing Impairment)</option>
-          </select>
-        </div>
+      <!-- Right Column: Holographic Preview Screen & Output Terminal -->
+      <div class="synthesis-column">
+        <div class="hologram-preview-screen" id="synthesis-preview-bay">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(6, 182, 212, 0.15); padding-bottom:8px;">
+            <span style="font-size:0.75rem; font-weight:800; color:var(--accent-cyan); letter-spacing:0.5px;">
+              <i class="fa-solid fa-circle-dot fa-fade" style="color:var(--accent-cyan)"></i> 數據合成全息艙
+            </span>
+            <span class="lcd-digital-badge" id="preview-status-lcd">SYS.STANDBY</span>
+          </div>
 
-        <div>
-          <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">年齡層 (Age Group)</label>
-          <select id="gen-age" class="glass-select" style="width:100%; padding:10px; border-radius:8px; background:var(--nested-bg-darkest); color:var(--text-bright); border:1px solid var(--card-border);">
-            <option value="20-29 歲 (青年待業/轉銜期)">20-29 歲 (青年待業/轉銜期)</option>
-            <option value="30-49 歲 (中年突發致殘/轉行期)" selected>30-49 歲 (中年突發致殘/轉行期)</option>
-            <option value="50 歲以上 (中老年復康期)">50 歲以上 (中老年復康期)</option>
-          </select>
-        </div>
+          <!-- Rotating DNA helix vector graphic -->
+          <div style="flex-grow:1; display:flex; align-items:center; justify-content:center; padding:12px; min-height:180px;">
+            <svg class="dna-helix-svg" width="90" height="180" viewBox="0 0 100 200">
+              <g fill="none" stroke-width="2.5">
+                <!-- Strand A (Cyan) -->
+                <path class="dna-strand" d="M25,10 C50,40 50,60 25,90 C0,120 0,140 25,170 C50,200 50,220 25,250" stroke="var(--accent-cyan)" />
+                <!-- Strand B (Purple) -->
+                <path class="dna-strand" d="M75,10 C50,40 50,60 75,90 C100,120 100,140 75,170 C50,200 50,220 75,250" stroke="var(--accent-purple)" style="animation-delay: -1s;" />
+                <!-- Connectors -->
+                <line x1="25" y1="20" x2="75" y2="20" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="37" y1="50" x2="63" y2="50" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="75" y1="90" x2="25" y2="90" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="63" y1="130" x2="37" y2="130" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="25" y1="170" x2="75" y2="170" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+              </g>
+              <circle cx="25" cy="10" r="3.5" fill="var(--accent-cyan)" />
+              <circle cx="75" cy="10" r="3.5" fill="var(--accent-purple)" />
+              <circle cx="37" cy="50" r="3.5" fill="var(--accent-cyan)" />
+              <circle cx="63" cy="50" r="3.5" fill="var(--accent-purple)" />
+              <circle cx="75" cy="90" r="3.5" fill="var(--accent-cyan)" />
+              <circle cx="25" cy="90" r="3.5" fill="var(--accent-purple)" />
+            </svg>
+          </div>
 
-        <div>
-          <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">就業動機與抗拒表現 (Motivation & Resistance)</label>
-          <select id="gen-motivation" class="glass-select" style="width:100%; padding:10px; border-radius:8px; background:var(--nested-bg-darkest); color:var(--text-bright); border:1px solid var(--card-border);">
-            <option value="極度焦慮抗拒，自我廢人化">極度焦慮抗拒，自我廢人化</option>
-            <option value="矛盾糾結，想工作但害怕面試失敗">矛盾糾結，想工作但害怕面試失敗</option>
-            <option value="積極嘗試，但缺乏自信心與溝通技巧">積極嘗試，但缺乏自信心與溝通技巧</option>
-          </select>
+          <!-- Futuristic Log console stream -->
+          <div class="hud-log-stream" id="hud-log-stream" style="overflow-y:auto;">
+            <p><i class="fa-solid fa-terminal" style="color:var(--accent-cyan);"></i> 生命特徵合成艙載入完畢。系統就緒。</p>
+            <p style="color:var(--text-muted);"><i class="fa-solid fa-angle-right"></i> 請點擊左側「啟動生命特徵合成艙」以注入神經參數。</p>
+          </div>
         </div>
-
-        <div>
-          <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">當前 MI 動機階段 (Stage of Change)</label>
-          <select id="gen-stage" class="glass-select" style="width:100%; padding:10px; border-radius:8px; background:var(--nested-bg-darkest); color:var(--text-bright); border:1px solid var(--card-border);">
-            <option value="前意向期 Pre-contemplation (未想改變)">前意向期 Pre-contemplation (未想改變)</option>
-            <option value="意向期 Contemplation (矛盾掙扎)" selected>意向期 Contemplation (矛盾掙扎)</option>
-            <option value="準備與行動期 Preparation / Action (準備就緒)">準備與行動期 Preparation / Action (準備就緒)</option>
-          </select>
-        </div>
-
-        <button class="btn btn-primary shimmer-btn" id="start-generate-case-btn" style="justify-content:center; padding:12px; margin-top:8px;">
-          <i class="fa-solid fa-atom"></i> 開始 AI 智能生成個案
-        </button>
       </div>
+
     </div>
   `;
 
-  document.getElementById("start-generate-case-btn").addEventListener("click", async () => {
-    const disabilityType = document.getElementById("gen-disability").value;
-    const ageGroup = document.getElementById("gen-age").value;
-    const motivationLevel = document.getElementById("gen-motivation").value;
-    const motivationStage = document.getElementById("gen-stage").value;
+  const form = document.getElementById("case-gen-form");
+  const previewBay = document.getElementById("synthesis-preview-bay");
+  const statusLcd = document.getElementById("preview-status-lcd");
 
-    const btn = document.getElementById("start-generate-case-btn");
-    btn.disabled = true;
-    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 正在調用 Gemini AI 合成個案中...`;
+  // Neon range slider inputs and LCD labels
+  const ageSlider = document.getElementById("gen-age-slider");
+  const ageLcd = document.getElementById("lcd-age-text");
+  const ageLabels = {
+    1: "青年待業期 (20-29 歲)",
+    2: "中年轉型期 (30-49 歲)",
+    3: "高齡致殘期 (50-62 歲)"
+  };
+  ageSlider.addEventListener("input", (e) => {
+    ageLcd.textContent = ageLabels[e.target.value];
+  });
 
-    try {
-      const customCase = await generateCustomCase(state.apiKey, state.selectedModel, {
-        disabilityType,
-        ageGroup,
-        motivationLevel,
-        motivationStage
-      });
+  const motSlider = document.getElementById("gen-motivation-slider");
+  const motLcd = document.getElementById("lcd-motivation-text");
+  const motLabels = {
+    1: "極低動機 (抗拒與嚴重逃避期)",
+    2: "中等動機 (糾結與矛盾想求變)",
+    3: "良好動機 (準備求職與接受訓練)"
+  };
+  motSlider.addEventListener("input", (e) => {
+    motLcd.textContent = motLabels[e.target.value];
+  });
 
-      state.cases.unshift(customCase);
+  const stageSlider = document.getElementById("gen-stage-slider");
+  const stageLcd = document.getElementById("lcd-stage-text");
+  const stageLabels = {
+    1: "意圖準備前階段 (拒絕考慮就業)",
+    2: "意圖階段 (想改變但重度焦慮)",
+    3: "準備與行動階段 (已面試或培訓)"
+  };
+  stageSlider.addEventListener("input", (e) => {
+    stageLcd.textContent = stageLabels[e.target.value];
+  });
+
+  // Disability hex gene slots click toggling
+  const geneChips = container.querySelectorAll(".gene-slot-card");
+  let selectedDisability = "肢體傷殘 (如肢體偏癱或脊髓損傷)";
+  
+  geneChips.forEach(chip => {
+    chip.addEventListener("click", () => {
+      geneChips.forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      selectedDisability = chip.getAttribute("data-value");
+      AudioSynth.playClick();
+    });
+  });
+
+  // Import code handler
+  const importBtn = document.getElementById("synthesis-import-btn");
+  if (importBtn) {
+    importBtn.addEventListener("click", () => {
+      const codeInput = document.getElementById("synthesis-import-code");
+      const code = codeInput ? codeInput.value.trim() : "";
+      if (!code) {
+        alert("請先貼上有效的基因分享碼！");
+        return;
+      }
       try {
-        const generatedOnly = state.cases.filter(c => c.id.startsWith("generated_") || c.id.startsWith("custom_"));
-        localStorage.setItem("rehab_custom_cases", JSON.stringify(generatedOnly));
-        RehabCounselorDB.saveCustomCase(customCase);
-      } catch (e) {}
+        const decoded = JSON.parse(decodeURIComponent(atob(code)));
+        if (!decoded.id || !decoded.name) {
+          throw new Error("無效的個案基因數據結構");
+        }
+        decoded.id = `imported_${Date.now()}`;
+        state.cases.unshift(decoded);
+        RehabCounselorDB.saveCustomCase(decoded);
+        AudioSynth.playUnlock();
+        alert(`🎉 成功導入個案「${decoded.name}」！已寫入實戰大廳。`);
+        renderCaseCatalog(container, switchViewCallback);
+      } catch (err) {
+        AudioSynth.playError();
+        alert(`基因碼導入失敗：${err.message}`);
+      }
+    });
+  }
 
-      AudioSynth.playSuccess();
-      checkAndUnlockAchievements("case_creator");
-      startRoleplaySession(customCase, switchViewCallback);
-    } catch (err) {
+  // Handle Form Submission for AI Case Synthesis
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    AudioSynth.playClick();
+
+    const disabilityType = selectedDisability;
+    const ageGroup = ageLabels[ageSlider.value];
+    const motivationLevel = motLabels[motSlider.value];
+    const motivationStage = stageLabels[stageSlider.value];
+
+    statusLcd.textContent = "SYS.SEQUENCING";
+    statusLcd.style.color = "var(--accent-cyan)";
+
+    // Replace preview screen with animated genetic sequencing HUD
+    previewBay.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(6, 182, 212, 0.15); padding-bottom:8px;">
+        <span style="font-size:0.75rem; font-weight:800; color:var(--accent-cyan); letter-spacing:0.5px;">
+          <i class="fa-solid fa-dna fa-spin" style="color:var(--accent-cyan)"></i> 基因鏈重組中 (Sequencing)
+        </span>
+        <span class="lcd-digital-badge" id="hud-percentage">0%</span>
+      </div>
+
+      <div class="synthesis-loading-hud" style="padding: 20px 0; gap: 20px; flex-grow:1; display:flex; flex-direction:column; justify-content:center;">
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:6px; color:var(--text-bright);">
+            <span id="synthesis-progress-title">初始化神經元連接...</span>
+            <span id="synthesis-progress-pct" style="color:var(--accent-cyan); font-weight:800;">0%</span>
+          </div>
+          <div class="synthesis-progress-track" style="height:8px; background:var(--nested-bg-darkest); border-radius:4px; overflow:hidden; border:1px solid var(--card-border);">
+            <div class="synthesis-progress-bar" id="synthesis-progress-bar" style="width:0%; height:100%; background:linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); transition:width 0.1s ease;"></div>
+          </div>
+        </div>
+
+        <div class="hud-log-stream" id="synthesis-inner-log" style="height:120px; font-size:0.72rem; overflow-y:auto;">
+          <p><i class="fa-solid fa-play" style="color:var(--accent-cyan);"></i> 啟動生命特徵合成艙協議...</p>
+        </div>
+      </div>
+    `;
+
+    const barFill = document.getElementById("synthesis-progress-bar");
+    const percentageText = document.getElementById("hud-percentage");
+    const pctText = document.getElementById("synthesis-progress-pct");
+    const progressTitle = document.getElementById("synthesis-progress-title");
+    const innerLog = document.getElementById("synthesis-inner-log");
+
+    const addInnerLog = (text) => {
+      const p = document.createElement("p");
+      p.innerHTML = text;
+      innerLog.appendChild(p);
+      innerLog.scrollTop = innerLog.scrollHeight;
+      AudioSynth.playPulse();
+    };
+
+    let geminiResult = null;
+    let geminiError = null;
+
+    generateCustomCase(state.apiKey, state.selectedModel, {
+      disabilityType,
+      ageGroup,
+      motivationLevel,
+      motivationStage
+    }).then(res => {
+      geminiResult = res;
+    }).catch(err => {
+      geminiError = err;
+    });
+
+    let progress = 0;
+    const steps = [
+      { p: 15, log: `🧬 提取病理特徵與職業功能受損基因...`, title: "DNA 生物病理提取..." },
+      { p: 48, log: `🌐 合成地道香港社會關係網與環境福利...`, title: "編排香港本土環境因素..." },
+      { p: 68, log: `📊 計算全套 ICF 全人評估六維矩陣...`, title: "生成 ICF 生物心理社會矩陣..." },
+      { p: 85, log: `💬 轉譯地道廣東話抗拒心理對話串流...`, title: "編寫港式對白與口訣..." },
+      { p: 95, log: `⚙️ API 對話通道與 UI 渲染線程對接...`, title: "建立就業對話系統通道..." },
+      { p: 99, log: `⏳ 等待 Gemini 智慧核准基因確認訊號...`, title: "等待 API 最終響應..." }
+    ];
+
+    let currentStepIdx = 0;
+    
+    const timer = setInterval(() => {
+      if (geminiError) {
+        clearInterval(timer);
+        renderError(geminiError.message);
+        return;
+      }
+
+      if (progress < 99) {
+        progress += 1;
+        barFill.style.width = `${progress}%`;
+        percentageText.textContent = `${progress}%`;
+        if (pctText) pctText.textContent = `${progress}%`;
+        
+        if (currentStepIdx < steps.length && progress >= steps[currentStepIdx].p) {
+          const step = steps[currentStepIdx];
+          progressTitle.textContent = step.title;
+          addInnerLog(step.log);
+          currentStepIdx++;
+        }
+      } else {
+        if (geminiResult) {
+          clearInterval(timer);
+          progress = 100;
+          barFill.style.width = `100%`;
+          percentageText.textContent = `100%`;
+          if (pctText) pctText.textContent = `100%`;
+          progressTitle.textContent = "個案基因特徵合成成功！";
+          addInnerLog(`⚡ 合成成功！基因序列已完全就緒。`);
+          AudioSynth.playUnlock();
+          
+          setTimeout(async () => {
+            geminiResult.category = disabilityType;
+            
+            // Preview container with Matrix scrambling decryption effects
+            previewBay.innerHTML = `
+              <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(6, 182, 212, 0.15); padding-bottom:8px; margin-bottom:12px;">
+                <span style="font-size:0.75rem; font-weight:800; color:var(--accent-green); letter-spacing:0.5px;">
+                  <i class="fa-solid fa-circle-check" style="color:var(--accent-green)"></i> 合成核准防偽預覽 (Gen Preview)
+                </span>
+                <span class="lcd-digital-badge" style="color:var(--accent-green); border-color:rgba(16,185,129,0.3); background:rgba(16,185,129,0.05);">GEN.APPROVED</span>
+              </div>
+
+              <!-- Premium custom card visual layout preview -->
+              <div class="gen-preview-badge" style="flex-grow:1; display:flex; flex-direction:column; justify-content:space-between; padding:12px 16px; margin:0; background:var(--nested-bg-darkest);">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:1.8rem; background:rgba(6,182,212,0.1); border:1px solid rgba(6,182,212,0.2); width:40px; height:40px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center;">
+                      ${geminiResult.avatar || "👤"}
+                    </span>
+                    <span class="lcd-digital-badge" id="decrypted-age" style="font-size:0.72rem; padding:1px 6px;">[解碼中]</span>
+                  </div>
+
+                  <h4 style="font-size:1.15rem; font-weight:900; color:var(--text-bright); margin:0 0 6px 0;" id="decrypted-name">[解碼中]</h4>
+                  <p style="font-size:0.78rem; color:var(--accent-cyan); margin:0 0 10px 0; line-height:1.3;" id="decrypted-diag">[解碼中]</p>
+                  
+                  <div style="border-top:1px dashed rgba(255,255,255,0.08); padding-top:8px; font-size:0.75rem; line-height:1.4; color:var(--text-main); font-style:italic;" id="decrypted-quote">
+                    [解碼中]
+                  </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns: 1.15fr 0.85fr; gap:10px; margin-top:14px;">
+                  <button class="btn btn-primary" id="btn-write-to-lobby" style="font-size:0.78rem; padding:8px 0; justify-content:center; display:none;"><i class="fa-solid fa-clipboard-check"></i> 寫入大廳</button>
+                  <button class="btn btn-share-case" id="btn-gen-preview-enter" style="font-size:0.78rem; padding:8px 0; justify-content:center; display:none; background:transparent; border-color:rgba(255,255,255,0.15);"><i class="fa-solid fa-comments"></i> 進入輔導</button>
+                </div>
+              </div>
+            `;
+
+            // Run decrypting typewriter scrambling effects on newly created data
+            await runDecryptionAnimation("decrypted-name", geminiResult.name);
+            await runDecryptionAnimation("decrypted-age", `${geminiResult.age}歲 / ${geminiResult.gender}`);
+            await runDecryptionAnimation("decrypted-diag", `🧬 診斷：${geminiResult.health_condition}`);
+            await runDecryptionAnimation("decrypted-quote", `🗣️ 地道抗拒對白：\n"${geminiResult.initial_dialogue}"`);
+
+            // Reveal action buttons
+            const writeBtn = document.getElementById("btn-write-to-lobby");
+            const enterBtn = document.getElementById("btn-gen-preview-enter");
+            
+            writeBtn.style.display = "inline-flex";
+            enterBtn.style.display = "inline-flex";
+
+            writeBtn.addEventListener("click", (e) => {
+              const rect = e.target.getBoundingClientRect();
+              triggerConfetti(rect.left + 40, rect.top + window.scrollY);
+
+              if (!state.cases.some(c => c.id === geminiResult.id)) {
+                state.cases.unshift(geminiResult);
+              }
+              try {
+                const customOnly = state.cases.filter(c => !["case_01", "case_02", "case_03", "case_04"].includes(c.id));
+                localStorage.setItem("rehab_custom_cases", JSON.stringify(customOnly));
+                RehabCounselorDB.saveCustomCase(geminiResult);
+              } catch(e) {}
+              checkAndUnlockAchievements("case_creator");
+              AudioSynth.playSuccess();
+              alert(`🎉 個案「${geminiResult.name}」已順利寫入大廳首位！`);
+              
+              const catalogBtn = document.getElementById("view-cases-catalog-btn");
+              if (catalogBtn) catalogBtn.click();
+            });
+
+            enterBtn.addEventListener("click", (e) => {
+              const rect = e.target.getBoundingClientRect();
+              triggerConfetti(rect.left + 40, rect.top + window.scrollY);
+
+              if (!state.cases.some(c => c.id === geminiResult.id)) {
+                state.cases.unshift(geminiResult);
+              }
+              try {
+                const customOnly = state.cases.filter(c => !["case_01", "case_02", "case_03", "case_04"].includes(c.id));
+                localStorage.setItem("rehab_custom_cases", JSON.stringify(customOnly));
+                RehabCounselorDB.saveCustomCase(geminiResult);
+              } catch(e) {}
+              checkAndUnlockAchievements("case_creator");
+              AudioSynth.playSuccess();
+              startRoleplaySession(geminiResult, switchViewCallback);
+            });
+
+          }, 600);
+        }
+      }
+    }, 60);
+
+    function renderError(errMsg) {
+      statusLcd.textContent = "GEN.ERROR";
       AudioSynth.playError();
-      alert(`個案生成失敗：${err.message}`);
-      btn.disabled = false;
-      btn.innerHTML = `<i class="fa-solid fa-atom"></i> 開始 AI 智能生成個案`;
+      previewBay.innerHTML = `
+        <h3 style="color:var(--accent-rose); font-size:1.15rem; font-weight:800; border-bottom:1px solid rgba(244,63,94,0.15); padding-bottom:8px;"><i class="fa-solid fa-triangle-exclamation"></i> 個案合成失敗</h3>
+        <p style="color:var(--text-muted); font-size:0.8rem; margin:10px 0;">生命艙出現系統性拒絕或 API 連線中斷：</p>
+        <div style="background:rgba(244,63,94,0.06); padding:12px; border-radius:10px; border-left:4px solid var(--accent-rose); color:var(--text-bright); font-family:monospace; font-size:0.78rem; margin-bottom:20px; white-space:pre-wrap; max-height:160px; overflow-y:auto; line-height:1.4;">${errMsg}</div>
+        <button class="btn btn-primary" id="btn-synthesis-retry" style="width:100%; justify-content:center;"><i class="fa-solid fa-rotate-left"></i> 重新進入生命艙</button>
+      `;
+      
+      document.getElementById("btn-synthesis-retry").addEventListener("click", () => {
+        renderCaseGenerator(container, switchViewCallback);
+      });
     }
   });
 }
