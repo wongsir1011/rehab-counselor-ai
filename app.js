@@ -3785,86 +3785,103 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
         "https://api.minimaxi.chat/v1/t2a_v2"
       ];
 
+  // 整理候選語音聲線 (Voice ID) 優先級
+  let primaryVoice = voiceId || "male-qn-qingse";
+  if (primaryVoice === "cantonese_male") primaryVoice = "male-qn-qingse";
+  if (primaryVoice === "cantonese_female") primaryVoice = "female-yujie";
+
+  const isFemaleCandidate = primaryVoice.includes("female") || primaryVoice.includes("yujie") || primaryVoice.includes("shaonv") || primaryVoice.includes("tianmei");
+  const candidateVoices = isFemaleCandidate 
+    ? [primaryVoice, "female-yujie", "female-shaonv", "female-tianmei", "presenter_female"]
+    : [primaryVoice, "male-qn-qingse", "male-qn-jingying", "male-qn-daxuesheng", "presenter_male"];
+
+  // 去重
+  const uniqueCandidateVoices = [...new Set(candidateVoices)];
+
   const candidateModels = ["speech-01-turbo", "speech-02-turbo", "speech-2.8-turbo"];
   let lastError = null;
   let attemptCount = 0;
 
   for (const baseUrl of candidateBases) {
     for (const gid of candidateGids) {
-      for (const modelName of candidateModels) {
-        attemptCount++;
-        const targetUrl = gid ? `${baseUrl}?GroupId=${encodeURIComponent(gid)}` : baseUrl;
-        appendMiniMaxLog(`\n[嘗試 #${attemptCount}] 發送請求至: ${targetUrl}`);
-        appendMiniMaxLog(`參數: model=${modelName}, voice_id=${voiceId || 'cantonese_male'}, text="${text.slice(0, 15)}..."`);
+      for (const curVoice of uniqueCandidateVoices) {
+        for (const modelName of candidateModels) {
+          attemptCount++;
+          const targetUrl = gid ? `${baseUrl}?GroupId=${encodeURIComponent(gid)}` : baseUrl;
+          appendMiniMaxLog(`\n[嘗試 #${attemptCount}] 發送請求至: ${targetUrl}`);
+          appendMiniMaxLog(`參數: model=${modelName}, voice_id=${curVoice}, text="${text.slice(0, 15)}..."`);
 
-        try {
-          const payload = {
-            model: modelName,
-            text: text,
-            stream: false,
-            voice_setting: {
-              voice_id: voiceId || "cantonese_male",
-              speed: 1.0,
-              vol: 1.0,
-              pitch: 0
-            },
-            audio_setting: {
-              sample_rate: 32000,
-              bitrate: 128000,
-              format: "mp3",
-              channel: 1
-            }
-          };
-
-          const response = await fetch(targetUrl, {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${cleanKey}`,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify(payload)
-          });
-
-          appendMiniMaxLog(`HTTP 回應狀態: ${response.status} ${response.statusText}`);
-
-          const rawText = await response.text();
-          let result = null;
           try {
-            result = JSON.parse(rawText);
-          } catch (e) {
-            appendMiniMaxLog(`⚠️ 非 JSON 回應內容: ${rawText.slice(0, 200)}`);
-          }
+            const payload = {
+              model: modelName,
+              text: text,
+              stream: false,
+              language_boost: "Chinese,Yue",
+              voice_setting: {
+                voice_id: curVoice,
+                speed: 1.0,
+                vol: 1.0,
+                pitch: 0
+              },
+              audio_setting: {
+                sample_rate: 32000,
+                bitrate: 128000,
+                format: "mp3",
+                channel: 1
+              }
+            };
 
-          if (result) {
-            if (result.base_resp) {
-              appendMiniMaxLog(`伺服器返回 base_resp: status_code=${result.base_resp.status_code}, status_msg="${result.base_resp.status_msg || ''}"`);
+            const response = await fetch(targetUrl, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${cleanKey}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify(payload)
+            });
+
+            appendMiniMaxLog(`HTTP 回應狀態: ${response.status} ${response.statusText}`);
+
+            const rawText = await response.text();
+            let result = null;
+            try {
+              result = JSON.parse(rawText);
+            } catch (e) {
+              appendMiniMaxLog(`⚠️ 非 JSON 回應內容: ${rawText.slice(0, 200)}`);
             }
-            if (result.base_resp && result.base_resp.status_code !== 0) {
-              const err = new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
-              err.code = result.base_resp.status_code;
+
+            if (result) {
+              if (result.base_resp) {
+                appendMiniMaxLog(`伺服器返回 base_resp: status_code=${result.base_resp.status_code}, status_msg="${result.base_resp.status_msg || ''}"`);
+              }
+              if (result.base_resp && result.base_resp.status_code !== 0) {
+                const err = new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
+                err.code = result.base_resp.status_code;
+                throw err;
+              }
+              if (result.data && result.data.audio) {
+                appendMiniMaxLog(`🎉 成功獲取音訊二進制數據 (Hex 長度: ${result.data.audio.length})！`);
+                const audioBytes = hexToUint8Array(result.data.audio);
+                if (!audioBytes) throw new Error("音訊解碼失敗");
+                appendMiniMaxLog(`✅ 成功解碼 MP3 音訊流 (聲線: ${curVoice})，準備播放！`);
+                const blob = new Blob([audioBytes], { type: "audio/mp3" });
+                return URL.createObjectURL(blob);
+              }
+            }
+
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${rawText}`);
+            }
+          } catch (err) {
+            lastError = err;
+            appendMiniMaxLog(`❌ 該輪嘗試失敗: ${err.message}`);
+            if (err.code === 2056) {
+              throw new Error("MiniMax (2056 額度不足)：您的帳戶餘額已耗盡，請至控制台充值。");
+            }
+            // 若錯誤是 2042 (voice_id 權限不足) 或 2049 (金鑰/端點)，繼續嘗試下一個候選組合
+            if (err.code && err.code !== 2049 && err.code !== 2042 && err.code !== 1004 && err.code !== 2013) {
               throw err;
             }
-            if (result.data && result.data.audio) {
-              appendMiniMaxLog(`🎉 成功獲取音訊二進制數據 (Hex 長度: ${result.data.audio.length})！`);
-              const audioBytes = hexToUint8Array(result.data.audio);
-              if (!audioBytes) throw new Error("音訊解碼失敗");
-              appendMiniMaxLog("✅ 成功解碼 MP3 音訊流，準備播放！");
-              const blob = new Blob([audioBytes], { type: "audio/mp3" });
-              return URL.createObjectURL(blob);
-            }
-          }
-
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${rawText}`);
-          }
-        } catch (err) {
-          lastError = err;
-          appendMiniMaxLog(`❌ 該輪嘗試失敗: ${err.message}`);
-          if (err.code === 2056) {
-            throw new Error("MiniMax (2056 額度不足)：您的帳戶餘額已耗盡，請至控制台充值。");
-          }
-          if (err.code && err.code !== 2049 && err.code !== 1004 && err.code !== 2013) {
-            throw err;
           }
         }
       }
@@ -5756,18 +5773,22 @@ function renderSettings(container) {
               <div>
                 <label style="font-size:0.8rem; color:var(--text-muted);">👨 男案主粵語聲線 (Male Timbre)</label>
                 <select id="set-minimax-male-timbre" style="margin-top:2px;">
-                  <option value="cantonese_male" ${state.minimaxMaleTimbre === 'cantonese_male' ? 'selected' : ''}>標準廣東話男聲 (cantonese_male)</option>
-                  <option value="male-qn-qingse" ${state.minimaxMaleTimbre === 'male-qn-qingse' ? 'selected' : ''}>青年男聲 (male-qn-qingse)</option>
-                  <option value="presenter_male" ${state.minimaxMaleTimbre === 'presenter_male' ? 'selected' : ''}>成熟男聲 (presenter_male)</option>
+                  <option value="male-qn-qingse" ${state.minimaxMaleTimbre === 'male-qn-qingse' || state.minimaxMaleTimbre === 'cantonese_male' ? 'selected' : ''}>青年男聲 (male-qn-qingse - 推薦 ⭐)</option>
+                  <option value="male-qn-jingying" ${state.minimaxMaleTimbre === 'male-qn-jingying' ? 'selected' : ''}>精英男聲 (male-qn-jingying)</option>
+                  <option value="male-qn-daxuesheng" ${state.minimaxMaleTimbre === 'male-qn-daxuesheng' ? 'selected' : ''}>陽光男聲 (male-qn-daxuesheng)</option>
+                  <option value="presenter_male" ${state.minimaxMaleTimbre === 'presenter_male' ? 'selected' : ''}>成熟播音男聲 (presenter_male)</option>
+                  <option value="male-qn-badao" ${state.minimaxMaleTimbre === 'male-qn-badao' ? 'selected' : ''}>磁性男聲 (male-qn-badao)</option>
                 </select>
               </div>
 
               <div>
                 <label style="font-size:0.8rem; color:var(--text-muted);">👩 女案主粵語聲線 (Female Timbre)</label>
                 <select id="set-minimax-female-timbre" style="margin-top:2px;">
-                  <option value="cantonese_female" ${state.minimaxFemaleTimbre === 'cantonese_female' ? 'selected' : ''}>標準廣東話女聲 (cantonese_female)</option>
-                  <option value="female-yujie" ${state.minimaxFemaleTimbre === 'female-yujie' ? 'selected' : ''}>溫柔女聲 (female-yujie)</option>
-                  <option value="presenter_female" ${state.minimaxFemaleTimbre === 'presenter_female' ? 'selected' : ''}>清晰女聲 (presenter_female)</option>
+                  <option value="female-yujie" ${state.minimaxFemaleTimbre === 'female-yujie' || state.minimaxFemaleTimbre === 'cantonese_female' ? 'selected' : ''}>溫柔成熟女聲 (female-yujie - 推薦 ⭐)</option>
+                  <option value="female-shaonv" ${state.minimaxFemaleTimbre === 'female-shaonv' ? 'selected' : ''}>活力少女 (female-shaonv)</option>
+                  <option value="female-tianmei" ${state.minimaxFemaleTimbre === 'female-tianmei' ? 'selected' : ''}>甜美女聲 (female-tianmei)</option>
+                  <option value="female-chengshu" ${state.minimaxFemaleTimbre === 'female-chengshu' ? 'selected' : ''}>幹練成熟女聲 (female-chengshu)</option>
+                  <option value="presenter_female" ${state.minimaxFemaleTimbre === 'presenter_female' ? 'selected' : ''}>清晰播音女聲 (presenter_female)</option>
                 </select>
               </div>
             </div>
