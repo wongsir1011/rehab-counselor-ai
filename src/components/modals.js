@@ -289,38 +289,49 @@ export function triggerConfettiAtCenter() {
   }
 }
 
-export function runDecryptionAnimation(element, targetText, duration = 800) {
-  const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?";
-  const length = targetText.length;
-  let index = 0;
+export function runDecryptionAnimation(elementOrId, finalStr, delayMs = 12) {
+  const el = typeof elementOrId === "string" ? document.getElementById(elementOrId) : elementOrId;
+  if (!el) return Promise.resolve();
   
-  const intervalTime = 30;
-  const stepsPerChar = Math.max(1, Math.floor(duration / (length * intervalTime)));
+  const str = finalStr || "";
+  const chars = "XYZ019864275$%&#@§*+=?[]{}<>";
+  const len = str.length;
+  el.innerHTML = "";
   
+  const spans = [];
+  for (let i = 0; i < len; i++) {
+    const s = document.createElement("span");
+    s.className = "decrypted-char decrypting-active";
+    s.textContent = chars[Math.floor(Math.random() * chars.length)];
+    el.appendChild(s);
+    spans.push(s);
+  }
+  
+  const cursor = document.createElement("span");
+  cursor.className = "decryption-cursor";
+  el.appendChild(cursor);
+
   return new Promise((resolve) => {
-    let currentStep = 0;
+    let index = 0;
     
     function decryptNextChar() {
-      if (index >= length) {
-        element.textContent = targetText;
+      if (index >= len) {
+        if (cursor.parentNode) cursor.remove();
         resolve();
         return;
       }
       
-      let scrambled = targetText.substring(0, index);
-      for (let i = index; i < length; i++) {
-        scrambled += charset[Math.floor(Math.random() * charset.length)];
+      spans[index].textContent = str[index];
+      spans[index].classList.remove("decrypting-active");
+      
+      for (let j = index + 1; j < len; j++) {
+        if (Math.random() > 0.45) {
+          spans[j].textContent = chars[Math.floor(Math.random() * chars.length)];
+        }
       }
       
-      element.textContent = scrambled;
-      
-      currentStep++;
-      if (currentStep >= stepsPerChar) {
-        currentStep = 0;
-        index++;
-      }
-      
-      setTimeout(decryptNextChar, intervalTime);
+      index++;
+      setTimeout(decryptNextChar, delayMs);
     }
     
     decryptNextChar();

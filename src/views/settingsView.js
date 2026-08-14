@@ -6,6 +6,7 @@ import { AudioSynth } from "../core/audioSynth.js";
 import { updateStaticUIStrings, updateApiBadge } from "../core/router.js";
 import { RehabCounselorDB } from "../utils/db.js";
 import { downloadFile, readTextFile } from "../utils/exportUtils.js";
+import { generateMiniMaxAudio } from "../core/speechEngine.js";
 
 export function renderSettings(container, switchViewCallback) {
   container.innerHTML = `
@@ -58,8 +59,8 @@ export function renderSettings(container, switchViewCallback) {
             </div>
 
             <div>
-              <label style="font-size:0.75rem; color:var(--text-bright);">MiniMax Group ID (用戶組 ID)</label>
-              <input type="text" id="set-minimax-group" value="${state.minimaxGroupId || ''}" placeholder="輸入 MiniMax Group ID (如: 18123456789)" style="margin-top:2px; font-size:0.8rem;" />
+              <label style="font-size:0.75rem; color:var(--text-bright);">MiniMax Group ID (用戶組 ID，如無可留空)</label>
+              <input type="text" id="set-minimax-group" value="${state.minimaxGroupId || ''}" placeholder="例如: 18123456789 (可選)" style="margin-top:2px; font-size:0.8rem;" />
             </div>
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
@@ -82,9 +83,15 @@ export function renderSettings(container, switchViewCallback) {
                 </select>
               </div>
             </div>
-            <p style="font-size:0.7rem; color:var(--text-muted);">
-              💡 系統會根據案主性別 ("男" vs "女") 自動切換相應的 MiniMax 廣東話音色。若連線失敗將自動 Fallback 至系統原生語音。
-            </p>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+              <p style="font-size:0.7rem; color:var(--text-muted); margin:0;">
+                💡 系統會依案主性別自動切換 MiniMax 男/女聲。
+              </p>
+              <button id="test-minimax-btn" type="button" class="btn btn-cyan" style="font-size:0.75rem; padding:4px 10px; white-space:nowrap;">
+                <i class="fa-solid fa-play"></i> 測試 MiniMax 廣東話發音
+              </button>
+            </div>
           </div>
         </div>
 
@@ -109,6 +116,9 @@ export function renderSettings(container, switchViewCallback) {
             <option value="zh-Hant-HK" ${state.recognitionLang === 'zh-Hant-HK' ? 'selected' : ''}>zh-Hant-HK (繁體中文香港 - Safari / Apple 裝置推薦 ⭐)</option>
             <option value="zh-CN" ${state.recognitionLang === 'zh-CN' ? 'selected' : ''}>zh-CN (普通話/簡體中文 - 僅供調試或特殊情況使用)</option>
           </select>
+          <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
+            🎙️ 語音識別已升級為「持續聆聽」模式，同工在說話停頓思考時麥克風不會自動中斷。
+          </p>
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:16px;">
@@ -158,6 +168,44 @@ export function renderSettings(container, switchViewCallback) {
   if (ttsEngineSelect && minimaxPanel) {
     ttsEngineSelect.addEventListener("change", (e) => {
       minimaxPanel.style.display = e.target.value !== "system" ? "flex" : "none";
+    });
+  }
+
+  // MiniMax 語音測試按鈕
+  const testMinimaxBtn = document.getElementById("test-minimax-btn");
+  if (testMinimaxBtn) {
+    testMinimaxBtn.addEventListener("click", async () => {
+      const key = document.getElementById("set-minimax-key").value.trim();
+      const group = document.getElementById("set-minimax-group").value.trim();
+      const engine = document.getElementById("set-tts-engine").value;
+      const maleTimbre = document.getElementById("set-minimax-male").value;
+
+      if (!key) {
+        alert("請先輸入 MiniMax API Key 才能進行語音測試！");
+        return;
+      }
+
+      state.ttsEngine = engine;
+      state.minimaxApiKey = key;
+      state.minimaxGroupId = group;
+      state.minimaxMaleTimbre = maleTimbre;
+
+      testMinimaxBtn.disabled = true;
+      testMinimaxBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 正在生成語音...`;
+
+      try {
+        const audioUrl = await generateMiniMaxAudio("社工你好，我係案主，呢個係 MiniMax 廣東話發音測試。", maleTimbre);
+        const audio = new Audio(audioUrl);
+        await audio.play();
+        AudioSynth.playSuccess();
+        alert("🎉 MiniMax 廣東話發音成功！API 金鑰及設定正常。");
+      } catch (err) {
+        AudioSynth.playError();
+        alert(`❌ MiniMax 語音生成失敗：${err.message}\n請檢查 API Key、Group ID 或是否選擇了正確的國際/國內版。`);
+      } finally {
+        testMinimaxBtn.disabled = false;
+        testMinimaxBtn.innerHTML = `<i class="fa-solid fa-play"></i> 測試 MiniMax 廣東話發音`;
+      }
     });
   }
 

@@ -161,13 +161,13 @@ export function parseFlexibleJson(rawText) {
 }
 
 /**
- * 1. AI 案主角色扮演對話生成 (連同 AI 臨床督導提示)
+ * 1. AI 案主角色扮演對話生成 (連同 AI 臨床督導提示 - 極速單次結構化呼叫)
  */
 export async function generateClientReply(apiKey, model, caseDetails, history, userMessage) {
   if (!apiKey) {
     return new Promise((resolve) => {
       setTimeout(() => {
-        const step = history.length / 2;
+        const step = Math.floor(history.length / 2);
         if (caseDetails.roleplay_flow && caseDetails.roleplay_flow[step]) {
           resolve({
             reply: caseDetails.roleplay_flow[step].ai_reply,
@@ -179,13 +179,13 @@ export async function generateClientReply(apiKey, model, caseDetails, history, u
             coachHint: "【AI 督導提示】：案主展現出重度疲憊與防衛。此時不宜再強力推進（如訂立行動計劃），建議使用 MI 的反映式傾聽（同理他的累與混亂），或 ACT 的關注當下（做一個簡單的呼吸練習，陪他安靜坐一陣）。"
           });
         }
-      }, 1500);
+      }, 400);
     });
   }
 
   const systemInstruction = `
-你是一位正在接受香港復康會職業復康輔導的案主。
-你的背景資料如下：
+你是一位正在接受香港復康會職業復康輔導的案主，同時承載 AI 臨床督導分析引擎。
+案主背景資料如下：
 - 姓名：${caseDetails.name}
 - 年齡/性別：${caseDetails.age}歲 / ${caseDetails.gender}
 - 身體狀況：${caseDetails.health_condition}
@@ -194,28 +194,46 @@ export async function generateClientReply(apiKey, model, caseDetails, history, u
 - 心理/情緒狀態：${caseDetails.emotional_state}
 
 請遵守以下扮演準則：
-1. 【完全聽懂並理解廣東話】：輔導員（User）會使用「地道廣東話口語」（或繁體中文）向你說話。作為土生土長的香港人，你必須百分之百完全聽得懂、理解並能精準捕捉輔導員說出的任何廣東話口語、香港本地詞彙（如搵工、綜援、再培訓）以及香港本地俗語的語意。
-2. 【語言風格】：你必須完全使用地道的「香港廣東話口語」回答（例如使用「我哋」、「係啊」、「唔想」、「搵工」、「阻手阻腳」、「綜援」、「社工」、「再培訓」等香港詞彙），不要夾雜任何簡體字，但可以夾雜少量香港人常用的英文單詞（如 ERB, Part-time, Stroke, Case 等）。
-3. 【對話態度與阻抗】：一開始你必須表現得相當抗拒、防衛或逃避（這是 ACT 的經驗性逃避與 MI 的矛盾期表現）。你覺得自己身體變殘疾了、已經是個廢人，或者極度焦慮面試。不要太快配合輔導員！
-4. 【逐步敞開心扉】：只有當輔導員（即User）使用了正確且真誠的諮商技巧時，你才能表現出微小的軟化或願意嘗試：
-   - 若User使用「同理心反映（MI Reflective Listening）」、「肯定（Affirmation）」，你會感到被理解，防衛會降低。
-   - 若User使用「認知解離（ACT Defusion）」或「價值澄清（ACT Values）」，你會開始思考自己人生更重要的價值，而不是死盯著身體的殘疾。
-   - 若User使用強行說教、教訓、指責、不耐煩的語氣，你必須變得更加生氣、冷淡或完全退縮。
-5. 每次回答長度請控制在 80-150 字左右，表現出真實對話的節奏。
+1. 【案主回應 (reply)】：
+   - 必須完全使用地道的「香港廣東話口語」回答（例如使用「我哋」、「係啊」、「唔想」、「搵工」、「阻手阻腳」、「綜援」、「社工」、「再培訓」等香港詞彙），切忌使用簡體字。
+   - 一開始表現得相當抗拒、防衛或逃避（ACT 經驗性逃避與 MI 矛盾期）。只有當輔導員使用正確的 MI 同理心反映、肯定或 ACT 認知解離/價值澄清時，防衛才逐步降低。若輔導員說教指責，則變得更生氣或退縮。長度控制在 80-140 字。
+2. 【督導提示 (coachHint)】：
+   - 以資深臨床督導身份，使用「繁體中文（香港習慣）」精準評估輔導員剛才的發言技巧（MI OARS / ACT Hexaflex / ICF），指出案主回應中的臨床訊號（如 Change Talk 或阻抗），並給出下一步實戰引導方向。總字數控制在 100-140 字。
 `;
 
-  const prompt = `輔導員剛才對你說了這句話：
+  const prompt = `輔導員剛才對案主說了這句話：
 「${userMessage}」
 
-請以案主的身份，根據當下的心理防衛程度與對話脈絡，給出你最真實的廣東話回應。`;
+請以 JSON 同時輸出案主的廣東話真實對話回應 (reply) 與臨床督導指引 (coachHint)。`;
+
+  const schema = {
+    type: "OBJECT",
+    properties: {
+      reply: { type: "STRING", description: "案主以地道香港廣東話口語給出的真實對話回應" },
+      coachHint: { type: "STRING", description: "針對輔導員此輪技巧與案主反應的繁體中文臨床督導具體指引與下一步建議" }
+    },
+    required: ["reply", "coachHint"]
+  };
 
   try {
-    const reply = await callGeminiAPI(apiKey, model, systemInstruction, prompt, history);
-    const coachHint = await generateCoachHint(apiKey, model, caseDetails, history, userMessage, reply);
-    return { reply, coachHint };
+    const rawJson = await callGeminiAPI(apiKey, model, systemInstruction, prompt, history, true, schema);
+    const parsed = parseFlexibleJson(rawJson);
+    return {
+      reply: parsed.reply || "（案主低頭沉思，沒有說話）",
+      coachHint: parsed.coachHint || "【AI 督導提示】：請持續運用反映式傾聽，同理案主此刻的內在感受。"
+    };
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    throw error;
+    console.warn("Unified client reply generation fallback:", error);
+    try {
+      const reply = await callGeminiAPI(apiKey, model, systemInstruction, prompt, history);
+      return {
+        reply,
+        coachHint: "【AI 督導提示】：請留意案主情緒變化，持續使用 MI OARS 技巧深化工作同盟。"
+      };
+    } catch (fallbackErr) {
+      console.error("Gemini API Error:", fallbackErr);
+      throw fallbackErr;
+    }
   }
 }
 
@@ -263,6 +281,9 @@ export async function generateCustomCase(apiKey, model, options) {
   const systemInstruction = `
 你是一位職業復康專家。你需要生成一個高度逼真、符合香港本地背景的殘疾人士或長期病患者職業復康個案。
 個案必須具有深度，適合社會工作者或輔導員進行 ACT, MI 及 ICF 實戰培訓。
+
+【重要格式規則】：
+- avatar 欄位必須為單個代表案主職業或性別特徵的 Emoji 符號（例如 👨‍✈️, 👨‍🦽, 👩‍🦼, 🧑‍💻, 👨‍💼, 👩‍🍳, 👨‍🔧, 👨, 👩），絕對不要輸出任何 URL 網址、圖片連結或英文文字！
 `;
 
   const prompt = `請根據以下設定，為我生成一個職業復康個案：
@@ -278,7 +299,7 @@ export async function generateCustomCase(apiKey, model, options) {
     properties: {
       id: { type: "STRING" },
       name: { type: "STRING" },
-      avatar: { type: "STRING" },
+      avatar: { type: "STRING", description: "單個合適的人物 Emoji 表情符號，嚴禁包含任何 URL 網址" },
       age: { type: "INTEGER" },
       gender: { type: "STRING" },
       health_condition: { type: "STRING" },
@@ -304,7 +325,16 @@ export async function generateCustomCase(apiKey, model, options) {
 
   try {
     const rawText = await callGeminiAPI(apiKey, model, systemInstruction, prompt, [], true, caseSchema);
-    return parseFlexibleJson(rawText);
+    const parsed = parseFlexibleJson(rawText);
+    
+    // Sanitize avatar to ensure it is never a URL string
+    if (!parsed.avatar || typeof parsed.avatar !== "string" || parsed.avatar.startsWith("http") || parsed.avatar.includes(".com") || parsed.avatar.includes(".png") || parsed.avatar.length > 8) {
+      const isFemale = parsed.gender === "女" || parsed.gender === "Female";
+      const isSenior = parsed.age && parsed.age >= 50;
+      parsed.avatar = isFemale ? (isSenior ? "👵" : "👩") : (isSenior ? "👴" : "👨");
+    }
+    
+    return parsed;
   } catch (error) {
     console.error("Failed to generate custom case:", error);
     throw error;

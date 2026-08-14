@@ -1,8 +1,8 @@
-import { state, checkAndUnlockAchievements } from "../core/state.js";
+import { state, checkAndUnlockAchievements, sanitizeCaseAvatar } from "../core/state.js";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateSoapSuggestions } from "../services/geminiService.js";
 import { speakCantonese, initVoiceRecognition, stopRecording } from "../core/speechEngine.js";
 import { AudioSynth } from "../core/audioSynth.js";
-import { exportSessionReport, triggerConfetti } from "../components/modals.js";
+import { exportSessionReport, triggerConfetti, runDecryptionAnimation } from "../components/modals.js";
 import { RehabCounselorDB } from "../utils/db.js";
 
 export function renderCaseArena(container, switchViewCallback) {
@@ -37,11 +37,14 @@ export function renderCaseArena(container, switchViewCallback) {
 export function renderCaseCatalog(container, switchViewCallback) {
   let selectedFilter = "all";
   let searchText = "";
+  
+  // Advanced filter parameters
   let filterAge = "all";
   let filterMotivation = "all";
   let filterOrigin = "all";
 
   container.innerHTML = `
+    <!-- High-Tech Dossier Lobby Controls -->
     <div class="dossier-search-wrapper" style="display:flex; flex-direction:column; gap:12px;">
       <div style="display:flex; gap:16px; align-items:center; width:100%; flex-wrap:wrap;">
         <div class="dossier-search-inner" style="flex-grow:1; min-width:280px;">
@@ -54,8 +57,10 @@ export function renderCaseCatalog(container, switchViewCallback) {
         </button>
       </div>
 
+      <!-- Collapsible Advanced Filters Drawer -->
       <div class="cyber-filters-panel" id="cyber-filters-drawer">
         <div class="cyber-filter-row">
+          <!-- 1. Age life stage -->
           <div class="cyber-filter-item">
             <label><i class="fa-solid fa-calendar-day" style="color:var(--accent-cyan);"></i> ${state.locale === 'en' ? 'Life Stage' : '生命階段'}</label>
             <select class="cyber-filter-select" id="filter-age-select">
@@ -66,6 +71,7 @@ export function renderCaseCatalog(container, switchViewCallback) {
             </select>
           </div>
 
+          <!-- 2. Motivation Level -->
           <div class="cyber-filter-item">
             <label><i class="fa-solid fa-gauge-simple-high" style="color:var(--accent-purple);"></i> ${state.locale === 'en' ? 'Work Motivation' : '就業與內在動機'}</label>
             <select class="cyber-filter-select" id="filter-motivation-select">
@@ -76,6 +82,7 @@ export function renderCaseCatalog(container, switchViewCallback) {
             </select>
           </div>
 
+          <!-- 3. Case Origin -->
           <div class="cyber-filter-item">
             <label><i class="fa-solid fa-circle-nodes" style="color:var(--accent-amber);"></i> ${state.locale === 'en' ? 'Case Source' : '檔案來源'}</label>
             <select class="cyber-filter-select" id="filter-origin-select">
@@ -87,6 +94,7 @@ export function renderCaseCatalog(container, switchViewCallback) {
         </div>
       </div>
       
+      <!-- Primary Category Pills -->
       <div class="dossier-filter-tabs" style="margin-top:8px;">
         <div class="dossier-filter-badge active" data-filter="all" style="--accent-color: var(--accent-purple); --accent-rgb: 124, 58, 237">
           <i class="fa-solid fa-box-archive"></i> ${state.locale === 'en' ? 'All Cases' : '全部個案'}
@@ -112,6 +120,7 @@ export function renderCaseCatalog(container, switchViewCallback) {
       </div>
     </div>
     
+    <!-- Holographic Cards Grid -->
     <div class="dossier-grid" id="dossier-cards-grid" style="margin-top: 24px;"></div>
   `;
 
@@ -122,122 +131,210 @@ export function renderCaseCatalog(container, switchViewCallback) {
   const filtersDrawer = document.getElementById("cyber-filters-drawer");
   const chevronIcon = document.getElementById("filters-chevron-icon");
 
+  // Advanced filter selectors
   const ageSelect = document.getElementById("filter-age-select");
   const motivationSelect = document.getElementById("filter-motivation-select");
   const originSelect = document.getElementById("filter-origin-select");
 
+  // Toggle advanced filter drawer
   toggleFiltersBtn.addEventListener("click", () => {
+    AudioSynth.playClick();
     const isOpen = filtersDrawer.classList.toggle("open");
     chevronIcon.style.transform = isOpen ? "rotate(180deg)" : "rotate(0deg)";
   });
 
-  function renderFilteredCards() {
-    cardsGrid.innerHTML = "";
-    
-    const filtered = state.cases.filter(c => {
-      const isCustom = c.id.startsWith("generated_") || c.id.startsWith("custom_");
-      if (filterOrigin === "prebuilt" && isCustom) return false;
-      if (filterOrigin === "custom" && !isCustom) return false;
-
-      if (filterAge === "youth" && (c.age < 20 || c.age > 29)) return false;
-      if (filterAge === "middle" && (c.age < 30 || c.age > 49)) return false;
-      if (filterAge === "elderly" && c.age < 50) return false;
-
-      if (filterMotivation !== "all") {
-        const emo = (c.emotional_state || "").toLowerCase();
-        if (filterMotivation === "low" && !emo.includes("抗拒") && !emo.includes("逃避") && !emo.includes("恐慌") && !emo.includes("廢人")) return false;
-        if (filterMotivation === "medium" && !emo.includes("焦慮") && !emo.includes("沮喪") && !emo.includes("猶豫") && !emo.includes("矛盾")) return false;
-        if (filterMotivation === "good" && !emo.includes("期待") && !emo.includes("主動") && !emo.includes("嘗試") && !emo.includes("積極")) return false;
-      }
-
+  function getFilteredCases() {
+    return state.cases.filter(c => {
+      // 1. Filter by category badge
       if (selectedFilter !== "all") {
-        const cond = (c.health_condition || "").toLowerCase();
+        const cat = (c.category || "").toLowerCase();
+        const condition = (c.health_condition || "").toLowerCase();
         
-        if (selectedFilter === "physical" && !cond.includes("偏癱") && !cond.includes("殘疾") && !cond.includes("截肢") && !cond.includes("輪椅")) return false;
-        if (selectedFilter === "brain" && !cond.includes("中風") && !cond.includes("腦傷") && !cond.includes("腦部")) return false;
-        if (selectedFilter === "mental" && !cond.includes("抑鬱") && !cond.includes("焦慮") && !cond.includes("思覺失調") && !cond.includes("精神")) return false;
-        if (selectedFilter === "asd" && !cond.includes("自閉") && !cond.includes("asd") && !cond.includes("發育")) return false;
-        if (selectedFilter === "chronic" && !cond.includes("痛症") && !cond.includes("脊椎") && !cond.includes("關節") && !cond.includes("慢性")) return false;
-        if (selectedFilter === "sensory" && !cond.includes("聽障") && !cond.includes("視障") && !cond.includes("感官")) return false;
+        if (selectedFilter === "physical" && !cat.includes("肢體") && !condition.includes("偏癱") && !condition.includes("肢體")) return false;
+        if (selectedFilter === "brain" && !cat.includes("腦部") && !condition.includes("中風") && !condition.includes("腦")) return false;
+        if (selectedFilter === "mental" && !cat.includes("精神") && !condition.includes("抑鬱") && !condition.includes("精神")) return false;
+        if (selectedFilter === "asd" && !cat.includes("發展") && !cat.includes("自閉") && !condition.includes("自閉") && !condition.includes("asd")) return false;
+        if (selectedFilter === "chronic" && !cat.includes("慢性") && !condition.includes("痛") && !condition.includes("慢性")) return false;
+        if (selectedFilter === "sensory" && !cat.includes("感官") && !condition.includes("聽力") && !condition.includes("聽障") && !condition.includes("視障") && !condition.includes("視力")) return false;
+      }
+      
+      // 2. Filter by search text
+      if (searchText) {
+        const q = searchText.toLowerCase();
+        const name = (c.name || "").toLowerCase();
+        const prevJob = (c.previous_job || "").toLowerCase();
+        const health = (c.health_condition || "").toLowerCase();
+        
+        if (!name.includes(q) && !prevJob.includes(q) && !health.includes(q)) return false;
       }
 
-      if (searchText.trim() !== "") {
-        const query = searchText.toLowerCase();
-        const matchName = c.name.toLowerCase().includes(query);
-        const matchJob = (c.previous_job || "").toLowerCase().includes(query);
-        const matchCond = (c.health_condition || "").toLowerCase().includes(query);
-        const matchFamily = (c.family || "").toLowerCase().includes(query);
-        return matchName || matchJob || matchCond || matchFamily;
+      // 3. Filter by Age range
+      if (filterAge !== "all") {
+        const age = c.age;
+        if (filterAge === "youth" && age >= 30) return false;
+        if (filterAge === "middle" && (age < 30 || age > 49)) return false;
+        if (filterAge === "elderly" && age < 50) return false;
       }
 
+      // 4. Filter by Motivation Stage / Level
+      if (filterMotivation !== "all") {
+        const mState = (c.emotional_state || "").toLowerCase();
+        const flow = JSON.stringify(c.roleplay_flow || []).toLowerCase();
+        
+        if (filterMotivation === "low") {
+          if (!mState.includes("極低") && !mState.includes("抗拒") && !mState.includes("融合") && !flow.includes("極低")) return false;
+        } else if (filterMotivation === "medium") {
+          if (!mState.includes("中等") && !mState.includes("矛盾") && !mState.includes("糾結") && !flow.includes("矛盾")) return false;
+        } else if (filterMotivation === "good") {
+          if (!mState.includes("良好") && !mState.includes("行動") && !flow.includes("行動")) return false;
+        }
+      }
+
+      // 5. Filter by Origin
+      if (filterOrigin !== "all") {
+        const isPrebuilt = ["case_01", "case_02", "case_03", "case_04"].includes(c.id);
+        if (filterOrigin === "prebuilt" && !isPrebuilt) return false;
+        if (filterOrigin === "custom" && isPrebuilt) return false;
+      }
+      
       return true;
     });
+  }
 
+  function getCaseThemeClass(c) {
+    const cat = (c.category || "").toLowerCase();
+    const condition = (c.health_condition || "").toLowerCase();
+    if (cat.includes("腦部") || condition.includes("中風") || condition.includes("腦")) return "dossier-neon-rose";
+    if (cat.includes("發展") || cat.includes("自閉") || condition.includes("自閉") || condition.includes("asd")) return "dossier-neon-purple";
+    if (cat.includes("慢性") || condition.includes("痛") || condition.includes("慢性")) return "dossier-neon-amber";
+    if (cat.includes("感官") || condition.includes("聽力") || condition.includes("聽障") || condition.includes("視力") || condition.includes("視障")) return "dossier-neon-cyan";
+    if (cat.includes("肢體") || condition.includes("肢體") || condition.includes("偏癱")) return "dossier-neon-green";
+    return "dossier-neon-green";
+  }
+
+  function renderFilteredCards() {
+    const filtered = getFilteredCases();
     if (filtered.length === 0) {
       cardsGrid.innerHTML = `
-        <div style="grid-column: 1 / -1; text-align:center; padding: 48px; background: rgba(255,255,255,0.02); border-radius: 12px; border: 1px dashed var(--card-border);">
-          <i class="fa-solid fa-folder-open" style="font-size: 2.5rem; color: var(--text-muted); margin-bottom: 12px;"></i>
-          <h4 style="color: var(--text-bright); font-size: 1.1rem; font-weight: 700;">未有找到符合篩選條件的復康個案</h4>
-          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 6px;">嘗試重設控制台篩選條件，或使用「AI 智能個案產生器」即時合成全新個案。</p>
+        <div class="glass-card" style="grid-column: 1 / -1; text-align: center; padding: 48px; border: 1px dashed var(--card-border);">
+          <i class="fa-solid fa-folder-open" style="font-size: 3rem; color: var(--text-muted); margin-bottom: 12px; opacity: 0.5;"></i>
+          <h4 style="color: var(--text-bright); font-weight: 700; margin-bottom: 6px;">未尋找到匹配個案檔案</h4>
+          <p style="color: var(--text-muted); font-size: 0.85rem;">建議縮短關鍵字，或使用頂部「AI 智能個案產生器」即時合成新個案！</p>
         </div>
       `;
       return;
     }
 
-    filtered.forEach(c => {
-      const isCustom = c.id.startsWith("generated_") || c.id.startsWith("custom_");
-      const card = document.createElement("div");
-      card.className = "dossier-card";
-      const isCompleted = state.completedCaseIds.includes(c.id);
-
-      card.innerHTML = `
-        <div class="dossier-card-header">
-          <div class="dossier-avatar">${c.avatar}</div>
-          <div class="dossier-title-group">
-            <h3>${c.name}</h3>
-            <p>${c.previous_job} · ${c.age}歲 (${c.gender})</p>
+    cardsGrid.innerHTML = filtered.map(c => {
+      const themeClass = getCaseThemeClass(c);
+      const isCustom = !["case_01", "case_02", "case_03", "case_04"].includes(c.id);
+      
+      return `
+        <div class="dossier-card ${themeClass}" style="transform-style: preserve-3d;">
+          ${isCustom ? `<div class="dossier-tag-custom"><i class="fa-solid fa-sparkles"></i> AI 基因合成</div>` : ""}
+          <div style="transform-style: preserve-3d;">
+            <div class="dossier-header" style="transform-style: preserve-3d;">
+              <div class="dossier-avatar-container">${sanitizeCaseAvatar(c).avatar || "👤"}</div>
+              <span class="dossier-badge-glow">${c.age}歲 / ${c.gender}</span>
+            </div>
+            
+            <h3 class="dossier-title">${c.name}</h3>
+            <p class="dossier-diag"><i class="fa-solid fa-dna"></i> 診斷：${c.health_condition}</p>
+            
+            <table class="dossier-tech-table" style="transform-style: preserve-3d;">
+              <tr style="transform-style: preserve-3d;">
+                <td class="label-cell">過往前職</td>
+                <td class="val-cell">${c.previous_job || "無資料"}</td>
+              </tr>
+              <tr style="transform-style: preserve-3d;">
+                <td class="label-cell">家庭福利</td>
+                <td class="val-cell">${c.family || "無資料"}</td>
+              </tr>
+              <tr style="transform-style: preserve-3d;">
+                <td class="label-cell">心理特徵</td>
+                <td class="val-cell" style="text-overflow: ellipsis; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-height: 40px; line-height: 1.3;">
+                  ${c.emotional_state || "無資料"}
+                </td>
+              </tr>
+            </table>
           </div>
-          ${isCompleted ? `
-            <span class="dossier-badge-status" style="background:rgba(16,185,129,0.15); color:var(--accent-green); border:1px solid rgba(16,185,129,0.3);">
-              <i class="fa-solid fa-circle-check"></i> 已完成評核
-            </span>
-          ` : isCustom ? `
-            <span class="dossier-badge-status" style="background:rgba(124,58,237,0.15); color:var(--accent-purple); border:1px solid rgba(124,58,237,0.3);">
-              ✨ AI 智能合成
-            </span>
-          ` : ''}
-        </div>
 
-        <div style="font-size:0.82rem; color:var(--text-main); margin-bottom:12px; display:flex; flex-direction:column; gap:4px;">
-          <div><strong style="color:var(--text-bright);">健康診斷：</strong>${c.health_condition}</div>
-          <div><strong style="color:var(--text-bright);">家庭福利：</strong>${c.family}，${c.welfare}</div>
-          <div><strong style="color:var(--text-bright);">心理狀態：</strong>${c.emotional_state}</div>
-        </div>
-
-        <div class="dossier-icf-preview">
-          ${c.icf_factors.slice(0, 3).map(f => `
-            <span class="icf-preview-tag" data-type="${f.type}">${f.text}</span>
-          `).join("")}
-          ${c.icf_factors.length > 3 ? `<span class="icf-preview-tag">+${c.icf_factors.length - 3}</span>` : ''}
-        </div>
-
-        <div class="dossier-action-bar">
-          <button class="btn btn-primary start-sim-btn" style="flex:1; justify-content:center;">
-            <i class="fa-solid fa-comments"></i> 進入模擬輔導
+          <div style="display:grid; grid-template-columns: 1.1fr 0.9fr; gap:10px; margin-top:8px; transform-style: preserve-3d;">
+            <button class="btn btn-primary start-roleplay-trigger" data-case="${c.id}" style="padding: 10px 4px; justify-content: center; font-size: 0.8rem;">
+              <i class="fa-solid fa-comments"></i> 語音對話模擬
+            </button>
+            <button class="btn start-icf-trigger" data-case="${c.id}" style="padding: 10px 4px; justify-content: center; font-size: 0.8rem;">
+              <i class="fa-solid fa-chart-simple"></i> ICF 全人分析
+            </button>
+          </div>
+          <button class="btn btn-share-case" data-case="${c.id}" style="width:100%; justify-content:center; font-size:0.75rem; padding:6px 0; margin-top:8px; border:1px dashed rgba(255,255,255,0.06); background:transparent; color:var(--text-muted);">
+            <i class="fa-solid fa-share-nodes"></i> 複製分享基因碼
           </button>
         </div>
       `;
+    }).join("");
 
-      card.querySelector(".start-sim-btn").addEventListener("click", () => {
-        startRoleplaySession(c, switchViewCallback);
+    // Initialize 3D Mouse Card Tilt animation
+    const isDesktop = window.innerWidth > 768;
+    const cards = cardsGrid.querySelectorAll(".dossier-card");
+    
+    cards.forEach(card => {
+      if (isDesktop) {
+        card.addEventListener("mousemove", (e) => {
+          const rect = card.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const xc = rect.width / 2;
+          const yc = rect.height / 2;
+          const dx = x - xc;
+          const dy = y - yc;
+          
+          card.style.transform = `perspective(1000px) rotateY(${dx / 12}deg) rotateX(${-dy / 12}deg) translateZ(10px)`;
+        });
+
+        card.addEventListener("mouseleave", () => {
+          card.style.transform = "perspective(1000px) rotateY(0deg) rotateX(0deg) translateZ(0px)";
+        });
+      }
+    });
+
+    // Attach button triggers
+    cardsGrid.querySelectorAll(".start-roleplay-trigger").forEach(btn => {
+      btn.addEventListener("click", () => {
+        AudioSynth.playClick();
+        const cid = btn.getAttribute("data-case");
+        const found = state.cases.find(c => c.id === cid);
+        if (found) startRoleplaySession(found, switchViewCallback);
       });
+    });
 
-      cardsGrid.appendChild(card);
+    cardsGrid.querySelectorAll(".start-icf-trigger").forEach(btn => {
+      btn.addEventListener("click", () => {
+        AudioSynth.playClick();
+        const cid = btn.getAttribute("data-case");
+        const found = state.cases.find(c => c.id === cid);
+        if (found) startICFAssessment(found, switchViewCallback);
+      });
+    });
+
+    cardsGrid.querySelectorAll(".btn-share-case").forEach(btn => {
+      btn.addEventListener("click", () => {
+        AudioSynth.playClick();
+        const cid = btn.getAttribute("data-case");
+        const found = state.cases.find(c => c.id === cid);
+        if (found) {
+          const geneCode = "GENE#" + btoa(unescape(encodeURIComponent(JSON.stringify(found))));
+          navigator.clipboard.writeText(geneCode);
+          AudioSynth.playSuccess();
+          alert(`已成功複製【${found.name}】的基因防偽碼到剪貼簿！\n同工可在 AI 個案產生器中一鍵導入使用。`);
+        }
+      });
     });
   }
 
   filterBadges.forEach(badge => {
     badge.addEventListener("click", () => {
+      AudioSynth.playClick();
       filterBadges.forEach(b => b.classList.remove("active"));
       badge.classList.add("active");
       selectedFilter = badge.getAttribute("data-filter");
@@ -251,16 +348,19 @@ export function renderCaseCatalog(container, switchViewCallback) {
   });
 
   ageSelect.addEventListener("change", (e) => {
+    AudioSynth.playClick();
     filterAge = e.target.value;
     renderFilteredCards();
   });
 
   motivationSelect.addEventListener("change", (e) => {
+    AudioSynth.playClick();
     filterMotivation = e.target.value;
     renderFilteredCards();
   });
 
   originSelect.addEventListener("change", (e) => {
+    AudioSynth.playClick();
     filterOrigin = e.target.value;
     renderFilteredCards();
   });
@@ -268,95 +368,737 @@ export function renderCaseCatalog(container, switchViewCallback) {
   renderFilteredCards();
 }
 
-export function renderCaseGenerator(container, switchViewCallback) {
-  container.innerHTML = `
-    <div class="glass-card" style="max-width:680px; margin:0 auto; display:flex; flex-direction:column; gap:20px;">
-      <div style="border-bottom:1px solid var(--card-border); padding-bottom:12px;">
-        <h3 style="font-size:1.3rem; font-weight:800; color:var(--text-bright); display:flex; align-items:center; gap:8px;">
-          <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--accent-purple);"></i> AI 智能個案產生器 (Bio-Gen Pod)
-        </h3>
-        <p style="font-size:0.85rem; color:var(--text-muted); margin-top:4px;">請選擇自訂訓練參數，Gemini AI 將為您合成一個高度擬真的香港本地殘疾/長期病患者職業復康個案。</p>
+export function startICFAssessment(selectedCase, switchViewCallback) {
+  state.activeCase = selectedCase;
+  state.activeView = "icf_board";
+
+  const title = document.getElementById("view-title");
+  const subtitle = document.getElementById("view-subtitle");
+  if (title) title.textContent = `ICF 個案全人分析：${selectedCase.name}`;
+  if (subtitle) subtitle.textContent = `請小組或同工個人，將左側案主背景特徵，分類拖放到右側正確的 ICF 五大評估維度中。`;
+
+  const mount = document.getElementById("content-view-mount");
+  if (!mount) return;
+  
+  const factors = [...selectedCase.icf_factors].sort(() => Math.random() - 0.5);
+
+  mount.innerHTML = `
+    <div class="icf-interactive-board">
+      
+      <!-- Left: Factors Pool -->
+      <div class="glass-card" style="display:flex; flex-direction:column; gap:12px;">
+        <h4 style="font-size:0.95rem; font-weight:800; color:var(--text-bright); border-bottom:1px solid var(--card-border); padding-bottom:8px;">
+          案主特徵因子池 (${factors.length} 個)
+        </h4>
+        <p style="font-size:0.75rem; color:var(--text-muted);">請點擊或拖放特徵到右側對應的 ICF 維度。小組共同研討效果更佳！</p>
+        
+        <div id="icf-factor-pool" style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; max-height:450px;">
+          ${factors.map((f, idx) => `
+            <div class="icf-source-factor" draggable="true" id="icf-factor-${idx}" data-type="${f.type}" data-text="${f.text}">
+              <i class="fa-solid fa-grip-vertical" style="color:var(--text-muted); margin-right:6px;"></i> ${f.text}
+            </div>
+          `).join("")}
+        </div>
       </div>
 
+      <!-- Right: ICF 5-category Board -->
       <div style="display:flex; flex-direction:column; gap:16px;">
-        <div>
-          <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">傷殘 / 疾病類別 (Disability Category)</label>
-          <select id="gen-disability" class="glass-select" style="width:100%; padding:10px; border-radius:8px; background:var(--nested-bg-darkest); color:var(--text-bright); border:1px solid var(--card-border);">
-            <option value="中風致肢體偏癱 (Stroke Hemiplegia)">中風致肢體偏癱 (Stroke Hemiplegia)</option>
-            <option value="工傷脊椎受損 (Spinal Cord Injury)">工傷脊椎受損 (Spinal Cord Injury)</option>
-            <option value="抑鬱及焦慮症 (Depression & Anxiety)">抑鬱及焦慮症 (Depression & Anxiety)</option>
-            <option value="自閉症譜系 (Autism Spectrum ASD)">自閉症譜系 (Autism Spectrum ASD)</option>
-            <option value="聽力障礙 (Hearing Impairment)">聽力障礙 (Hearing Impairment)</option>
-          </select>
+        
+        <!-- ICF Matrix Layout Grid -->
+        <div class="icf-matrix-grid">
+          <div class="glass-card icf-drop-zone" id="icf-zone-health_condition" data-zone="health_condition">
+            <h4><i class="fa-solid fa-notes-medical" style="color:var(--accent-rose);"></i> 健康狀況</h4>
+            <div class="zone-mount-point" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
+
+          <div class="glass-card icf-drop-zone" id="icf-zone-body_functions" data-zone="body_functions">
+            <h4><i class="fa-solid fa-stethoscope" style="color:var(--accent-purple);"></i> 身體功能結構</h4>
+            <div class="zone-mount-point" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
+
+          <div class="glass-card icf-drop-zone" id="icf-zone-activities" data-zone="activities">
+            <h4><i class="fa-solid fa-wheelchair" style="color:var(--accent-cyan);"></i> 個人活動 (Capacity)</h4>
+            <div class="zone-mount-point" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
+
+          <div class="glass-card icf-drop-zone" id="icf-zone-participation" data-zone="participation">
+            <h4><i class="fa-solid fa-briefcase" style="color:var(--accent-green);"></i> 社會參與 (Performance)</h4>
+            <div class="zone-mount-point" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
+
+          <div class="glass-card icf-drop-zone" id="icf-zone-environmental_factors" data-zone="environmental_factors">
+            <h4><i class="fa-solid fa-building-columns" style="color:var(--accent-amber);"></i> 環境因素</h4>
+            <div class="zone-mount-point" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
+
+          <div class="glass-card icf-drop-zone" id="icf-zone-personal_factors" data-zone="personal_factors">
+            <h4><i class="fa-solid fa-user" style="color:var(--text-muted);"></i> 個人因素</h4>
+            <div class="zone-mount-point" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
         </div>
 
-        <div>
-          <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">年齡層 (Age Group)</label>
-          <select id="gen-age" class="glass-select" style="width:100%; padding:10px; border-radius:8px; background:var(--nested-bg-darkest); color:var(--text-bright); border:1px solid var(--card-border);">
-            <option value="20-29 歲 (青年待業/轉銜期)">20-29 歲 (青年待業/轉銜期)</option>
-            <option value="30-49 歲 (中年突發致殘/轉行期)" selected>30-49 歲 (中年突發致殘/轉行期)</option>
-            <option value="50 歲以上 (中老年復康期)">50 歲以上 (中老年復康期)</option>
-          </select>
+        <!-- Submit Evaluation bar -->
+        <div style="display:flex; justify-content:flex-end; gap:12px;">
+          <button class="btn btn-primary" id="icf-submit-analysis-btn">提交 AI 診斷評估</button>
+          <button class="btn" id="icf-cancel-btn">取消返回</button>
         </div>
 
-        <div>
-          <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">就業動機與抗拒表現 (Motivation & Resistance)</label>
-          <select id="gen-motivation" class="glass-select" style="width:100%; padding:10px; border-radius:8px; background:var(--nested-bg-darkest); color:var(--text-bright); border:1px solid var(--card-border);">
-            <option value="極度焦慮抗拒，自我廢人化">極度焦慮抗拒，自我廢人化</option>
-            <option value="矛盾糾結，想工作但害怕面試失敗">矛盾糾結，想工作但害怕面試失敗</option>
-            <option value="積極嘗試，但缺乏自信心與溝通技巧">積極嘗試，但缺乏自信心與溝通技巧</option>
-          </select>
-        </div>
+      </div>
 
-        <div>
-          <label style="display:block; font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;">當前 MI 動機階段 (Stage of Change)</label>
-          <select id="gen-stage" class="glass-select" style="width:100%; padding:10px; border-radius:8px; background:var(--nested-bg-darkest); color:var(--text-bright); border:1px solid var(--card-border);">
-            <option value="前意向期 Pre-contemplation (未想改變)">前意向期 Pre-contemplation (未想改變)</option>
-            <option value="意向期 Contemplation (矛盾掙扎)" selected>意向期 Contemplation (矛盾掙扎)</option>
-            <option value="準備與行動期 Preparation / Action (準備就緒)">準備與行動期 Preparation / Action (準備就緒)</option>
-          </select>
-        </div>
+    </div>
+  `;
 
-        <button class="btn btn-primary shimmer-btn" id="start-generate-case-btn" style="justify-content:center; padding:12px; margin-top:8px;">
-          <i class="fa-solid fa-atom"></i> 開始 AI 智能生成個案
-        </button>
+  // Initialize Drag & Drop Events
+  const pool = document.getElementById("icf-factor-pool");
+  const factorEls = pool.querySelectorAll(".icf-source-factor");
+  const zones = document.querySelectorAll(".icf-drop-zone");
+
+  factorEls.forEach(factor => {
+    factor.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", factor.id);
+    });
+
+    factor.addEventListener("click", () => {
+      AudioSynth.playClick();
+      const zonesList = ["health_condition", "body_functions", "activities", "participation", "environmental_factors", "personal_factors"];
+      const targetZoneIdx = prompt("請輸入你要分類到的區域序號（1:健康狀況, 2:身體功能結構, 3:個人活動, 4:社會參與, 5:環境因素, 6:個人因素）：");
+      const matchedType = zonesList[parseInt(targetZoneIdx) - 1];
+      if (matchedType) {
+        const matchingZone = document.getElementById(`icf-zone-${matchedType}`);
+        if (matchingZone) moveFactorToZone(factor, matchingZone);
+      }
+    });
+  });
+
+  zones.forEach(zone => {
+    zone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      zone.classList.add("dragover");
+    });
+
+    zone.addEventListener("dragleave", () => {
+      zone.classList.remove("dragover");
+    });
+
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      zone.classList.remove("dragover");
+      const factorId = e.dataTransfer.getData("text/plain");
+      const factor = document.getElementById(factorId);
+      if (factor) {
+        AudioSynth.playClick();
+        moveFactorToZone(factor, zone);
+      }
+    });
+  });
+
+  function moveFactorToZone(factorEl, zoneEl) {
+    const mountPoint = zoneEl.querySelector(".zone-mount-point");
+    const text = factorEl.getAttribute("data-text");
+    const targetType = zoneEl.getAttribute("data-zone");
+    const correctType = factorEl.getAttribute("data-type");
+
+    const tag = document.createElement("div");
+    tag.className = "factor-tag";
+    tag.setAttribute("data-correct", correctType);
+    tag.setAttribute("data-placed", targetType);
+    tag.innerHTML = `
+      <span>${text}</span>
+      <span class="remove-btn" title="移回特徵池"><i class="fa-solid fa-xmark"></i></span>
+    `;
+
+    tag.querySelector(".remove-btn").addEventListener("click", () => {
+      AudioSynth.playClick();
+      tag.remove();
+      factorEl.style.display = "block";
+    });
+
+    mountPoint.appendChild(tag);
+    factorEl.style.display = "none";
+  }
+
+  // Cancel trigger
+  document.getElementById("icf-cancel-btn").addEventListener("click", () => {
+    AudioSynth.playClick();
+    if (typeof switchViewCallback === "function") switchViewCallback("arena");
+  });
+
+  // Submit trigger
+  document.getElementById("icf-submit-analysis-btn").addEventListener("click", () => {
+    AudioSynth.playClick();
+    evaluateICFMapping(selectedCase, switchViewCallback);
+  });
+}
+
+function evaluateICFMapping(selectedCase, switchViewCallback) {
+  const zones = document.querySelectorAll(".icf-drop-zone");
+  let totalPlaced = 0;
+  let correctCount = 0;
+  let incorrectList = [];
+
+  zones.forEach(zone => {
+    const tags = zone.querySelectorAll(".factor-tag");
+    tags.forEach(tag => {
+      totalPlaced++;
+      const correct = tag.getAttribute("data-correct");
+      const placed = tag.getAttribute("data-placed");
+      
+      if (correct === placed) {
+        correctCount++;
+      } else {
+        incorrectList.push({
+          text: tag.querySelector("span").textContent,
+          correct: correct,
+          placed: placed
+        });
+      }
+    });
+  });
+
+  const pool = document.getElementById("icf-factor-pool");
+  const unplaced = Array.from(pool ? pool.querySelectorAll(".icf-source-factor") : []).filter(f => f.style.display !== "none");
+
+  if (totalPlaced === 0) {
+    alert("請先將案主特徵因子分類放入右側的 ICF 框格中。");
+    return;
+  }
+
+  const scorePercent = Math.round((correctCount / totalPlaced) * 100);
+  
+  let evaluationHtml = `
+    <div class="glass-card" style="max-width: 650px; margin: 20px auto; display:flex; flex-direction:column; gap:20px;">
+      <div style="text-align:center;">
+        <span style="font-size:4rem;">📊</span>
+        <h3 style="font-size:1.4rem; font-weight:800; color:var(--text-bright); margin-top:8px;">小組/個人 ICF 分類診斷完成！</h3>
+        <p style="font-size:1.8rem; font-weight:900; color:${scorePercent >= 80 ? 'var(--accent-green)' : scorePercent >= 60 ? 'var(--accent-amber)' : 'var(--accent-rose)'}; margin-top:6px;">
+          準確率：${scorePercent}% (${correctCount}/${totalPlaced})
+        </p>
+      </div>
+
+      <div style="border-top:1px solid var(--card-border); padding-top:16px;">
+        <h4 style="color:var(--text-bright); margin-bottom:8px;"><i class="fa-solid fa-circle-info" style="color:var(--accent-cyan);"></i> ICF 專家臨床剖析反饋：</h4>
+  `;
+
+  if (incorrectList.length === 0 && unplaced.length === 0) {
+    checkAndUnlockAchievements("icf_expert");
+    AudioSynth.playSuccess();
+    triggerConfetti(window.innerWidth / 2, window.innerHeight / 2 + window.scrollY);
+
+    evaluationHtml += `
+      <p style="color:var(--accent-green); font-size:0.9rem; font-weight:600; line-height:1.6;">
+        【堪稱完美！】小組非常精準地辨識了${selectedCase.name}所有的 ICF 維度！這反映了同工極佳的全人評估眼界，能清晰將疾病本身（身體功能損傷）與社會情境抗拒（活動與社會參與障礙）完美區分開來。這為後續制定精準的職業復康計劃打下了無比堅實的基礎！
+      </p>
+    `;
+  } else {
+    AudioSynth.playError();
+    const getICFName = (t) => {
+      const map = {
+        health_condition: "健康狀況",
+        body_functions: "身體功能結構",
+        activities: "個人活動 (Capacity)",
+        participation: "社會參與 (Performance)",
+        environmental_factors: "環境因素",
+        personal_factors: "個人因素"
+      };
+      return map[t] || t;
+    };
+
+    evaluationHtml += `
+      <p style="font-size:0.88rem; color:var(--text-main); margin-bottom:12px;">分類反思指引：</p>
+      <ul style="list-style:none; display:flex; flex-direction:column; gap:10px; font-size:0.82rem; padding:0;">
+        ${incorrectList.map(item => `
+          <li style="background:rgba(244,63,94,0.06); padding:8px 12px; border-radius:6px; border-left:3px solid var(--accent-rose);">
+            <strong>「${item.text}」</strong><br>
+            <span style="color:var(--text-muted);">你放入了：</span><span style="color:var(--accent-rose); font-weight:700;">${getICFName(item.placed)}</span> | 
+            <span style="color:var(--text-muted);">專家建議放入：</span><span style="color:var(--accent-green); font-weight:700;">${getICFName(item.correct)}</span>
+          </li>
+        `).join("")}
+        ${unplaced.map(item => `
+          <li style="background:rgba(245,158,11,0.06); padding:8px 12px; border-radius:6px; border-left:3px solid var(--accent-amber);">
+            <strong>「${item.getAttribute("data-text")}」</strong> 未被分類放入，建議小組深入探討該因子對職業復康的實務影響。
+          </li>
+        `).join("")}
+      </ul>
+    `;
+  }
+
+  evaluationHtml += `
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:12px; border-top:1px solid var(--card-border); padding-top:16px;">
+        <button class="btn btn-primary" id="icf-eval-close-btn">重新挑戰 / 返回</button>
       </div>
     </div>
   `;
 
-  document.getElementById("start-generate-case-btn").addEventListener("click", async () => {
-    const disabilityType = document.getElementById("gen-disability").value;
-    const ageGroup = document.getElementById("gen-age").value;
-    const motivationLevel = document.getElementById("gen-motivation").value;
-    const motivationStage = document.getElementById("gen-stage").value;
+  const mount = document.getElementById("content-view-mount");
+  if (mount) {
+    mount.innerHTML = evaluationHtml;
+    document.getElementById("icf-eval-close-btn").addEventListener("click", () => {
+      AudioSynth.playClick();
+      if (typeof switchViewCallback === "function") switchViewCallback("arena");
+    });
+  }
+}
 
-    const btn = document.getElementById("start-generate-case-btn");
-    btn.disabled = true;
-    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 正在調用 Gemini AI 合成個案中...`;
 
-    try {
-      const customCase = await generateCustomCase(state.apiKey, state.selectedModel, {
-        disabilityType,
-        ageGroup,
-        motivationLevel,
-        motivationStage
-      });
+export function renderCaseGenerator(container, switchViewCallback) {
+  container.innerHTML = `
+    <div class="synthesis-pod-layout">
+      
+      <!-- Left Column: Gene Configuration Dials -->
+      <div class="synthesis-column">
+        <div class="glass-card" style="padding: 24px; position:relative; overflow:hidden;">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--card-border); padding-bottom:10px; margin-bottom:16px;">
+            <h3 style="font-size:1.15rem; font-weight:800; color:var(--text-bright); margin:0;">
+              <i class="fa-solid fa-microchip" style="color:var(--accent-purple); margin-right:6px;"></i> 自定義個案合成基因艙 (Bio-Gen Pod)
+            </h3>
+            <span class="lcd-digital-badge" style="font-size:0.7rem;">POD.v2.5</span>
+          </div>
+          
+          <p style="font-size:0.82rem; color:var(--text-muted); line-height:1.4; margin-bottom:20px;">
+            配置底層核心參數，結合 Google Gemini 智慧引擎，在數秒內模擬注入地道香港社會變量，合成包含全套 ICF 分類及港式抗拒對白之就業個案。
+          </p>
 
-      state.cases.unshift(customCase);
+          <!-- Import external gene code -->
+          <div style="background:var(--nested-bg-faint); border:1px dashed var(--card-border); border-radius:10px; padding:12px; margin-bottom:20px;">
+            <label style="font-size:0.7rem; font-weight:800; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:6px;"><i class="fa-solid fa-file-import"></i> 導入同工分享的基因碼</label>
+            <div style="display:flex; gap:8px;">
+              <input type="text" id="synthesis-import-code" placeholder="貼上複製的基因防偽碼..." style="flex-grow:1; background:var(--nested-bg-dark); border:1px solid var(--card-border); border-radius:6px; padding:6px 10px; font-size:0.78rem; color:var(--text-bright); outline:none;" />
+              <button class="btn btn-cyan" id="synthesis-import-btn" style="padding:6px 12px; font-size:0.75rem; white-space:nowrap;"><i class="fa-solid fa-arrow-down-left-from-top"></i> 導入寫入</button>
+            </div>
+          </div>
+
+          <form id="case-gen-form" class="synthesis-form" style="gap:18px;">
+            
+            <!-- 1. Disability Category Gene Slots -->
+            <div class="synthesis-group">
+              <label><i class="fa-solid fa-dna"></i> 1. 疾病與障礙基因插槽 (Disability Chip)</label>
+              
+              <div class="gene-slots-grid">
+                <div class="gene-slot-card active" data-value="肢體傷殘 (如肢體偏癱或脊髓損傷)">
+                  <i class="fa-solid fa-wheelchair"></i>
+                  <div>
+                    <div class="gene-slot-title">肢體傷殘</div>
+                    <div class="gene-slot-subtitle">肢體偏癱或結構受損</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="腦部損傷康復 (如中風、創傷性腦受損)">
+                  <i class="fa-solid fa-brain"></i>
+                  <div>
+                    <div class="gene-slot-title">中風腦損</div>
+                    <div class="gene-slot-subtitle">缺血性中風/認知受損</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="精神康復 (如重度抑鬱、精神分裂康復者)">
+                  <i class="fa-solid fa-hand-holding-heart"></i>
+                  <div>
+                    <div class="gene-slot-title">精神康復</div>
+                    <div class="gene-slot-subtitle">情緒障礙/精神症適應</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="神經發展障礙 (如自閉症 ASD、過動症 ADHD)">
+                  <i class="fa-solid fa-child-reaching"></i>
+                  <div>
+                    <div class="gene-slot-title">自閉譜系</div>
+                    <div class="gene-slot-subtitle">ASD社交障礙青年</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="慢性疾病 (如慢性疼痛、糖尿病或心臟病)">
+                  <i class="fa-solid fa-kit-medical"></i>
+                  <div>
+                    <div class="gene-slot-title">慢性疾病</div>
+                    <div class="gene-slot-subtitle">纖維肌痛症/慢性痛症</div>
+                  </div>
+                </div>
+
+                <div class="gene-slot-card" data-value="感官障礙 (如聽力損失、視力受損)">
+                  <i class="fa-solid fa-ear-deaf"></i>
+                  <div>
+                    <div class="gene-slot-title">感官障礙</div>
+                    <div class="gene-slot-subtitle">聽覺障礙/助聽器適應</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Age group custom Neon Slider -->
+            <div class="synthesis-group">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label><i class="fa-solid fa-calendar-days"></i> 2. 案主生命階段參數 (Age Stage)</label>
+                <span class="lcd-digital-badge" id="lcd-age-text">青年待業期 (20-29 歲)</span>
+              </div>
+              <input type="range" class="cyber-slider" id="gen-age-slider" min="1" max="3" value="1" />
+            </div>
+
+            <!-- 3. Motivation custom Neon Slider -->
+            <div class="synthesis-group">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label><i class="fa-solid fa-shield-halved"></i> 3. 心理逃避與動機強度 (ACT Motivation)</label>
+                <span class="lcd-digital-badge" id="lcd-motivation-text">極低動機 (抗拒與嚴重逃避期)</span>
+              </div>
+              <input type="range" class="cyber-slider" id="gen-motivation-slider" min="1" max="3" value="1" />
+            </div>
+
+            <!-- 4. Motivation Stage custom Neon Slider -->
+            <div class="synthesis-group">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <label><i class="fa-solid fa-gauge-simple-high"></i> 4. 改變動機階段分期 (MI Stage)</label>
+                <span class="lcd-digital-badge" id="lcd-stage-text">意圖準備前階段 (拒絕就業)</span>
+              </div>
+              <input type="range" class="cyber-slider" id="gen-stage-slider" min="1" max="3" value="1" />
+            </div>
+
+            <div id="gen-error" style="display:none; color:var(--accent-rose); font-size:0.82rem; font-weight:600; background:rgba(244,63,94,0.06); padding:10px; border-radius:8px; border-left:3px solid var(--accent-rose); margin-top:8px;"></div>
+
+            <button type="submit" class="synthesis-btn-run" style="width:100%;">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> 啟動生命特徵合成艙 (Begin Synthesis)
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Right Column: Holographic Preview Screen & Output Terminal -->
+      <div class="synthesis-column">
+        <div class="hologram-preview-screen" id="synthesis-preview-bay">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(6, 182, 212, 0.15); padding-bottom:8px;">
+            <span style="font-size:0.75rem; font-weight:800; color:var(--accent-cyan); letter-spacing:0.5px;">
+              <i class="fa-solid fa-circle-dot fa-fade" style="color:var(--accent-cyan)"></i> 數據合成全息艙
+            </span>
+            <span class="lcd-digital-badge" id="preview-status-lcd">SYS.STANDBY</span>
+          </div>
+
+          <!-- Rotating DNA helix vector graphic -->
+          <div style="flex-grow:1; display:flex; align-items:center; justify-content:center; padding:12px; min-height:180px;">
+            <svg class="dna-helix-svg" width="90" height="180" viewBox="0 0 100 200">
+              <g fill="none" stroke-width="2.5">
+                <!-- Strand A (Cyan) -->
+                <path class="dna-strand" d="M25,10 C50,40 50,60 25,90 C0,120 0,140 25,170 C50,200 50,220 25,250" stroke="var(--accent-cyan)" />
+                <!-- Strand B (Purple) -->
+                <path class="dna-strand" d="M75,10 C50,40 50,60 75,90 C100,120 100,140 75,170 C50,200 50,220 75,250" stroke="var(--accent-purple)" style="animation-delay: -1s;" />
+                <!-- Connectors -->
+                <line x1="25" y1="20" x2="75" y2="20" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="37" y1="50" x2="63" y2="50" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="75" y1="90" x2="25" y2="90" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="63" y1="130" x2="37" y2="130" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+                <line x1="25" y1="170" x2="75" y2="170" stroke="var(--illustration-line)" stroke-dasharray="2 2" />
+              </g>
+              <circle cx="25" cy="10" r="3.5" fill="var(--accent-cyan)" />
+              <circle cx="75" cy="10" r="3.5" fill="var(--accent-purple)" />
+              <circle cx="37" cy="50" r="3.5" fill="var(--accent-cyan)" />
+              <circle cx="63" cy="50" r="3.5" fill="var(--accent-purple)" />
+              <circle cx="75" cy="90" r="3.5" fill="var(--accent-cyan)" />
+              <circle cx="25" cy="90" r="3.5" fill="var(--accent-purple)" />
+            </svg>
+          </div>
+
+          <!-- Futuristic Log console stream -->
+          <div class="hud-log-stream" id="hud-log-stream" style="overflow-y:auto;">
+            <p><i class="fa-solid fa-terminal" style="color:var(--accent-cyan);"></i> 生命特徵合成艙載入完畢。系統就緒。</p>
+            <p style="color:var(--text-muted);"><i class="fa-solid fa-angle-right"></i> 請點擊左側「啟動生命特徵合成艙」以注入神經參數。</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  `;
+
+  const form = document.getElementById("case-gen-form");
+  const previewBay = document.getElementById("synthesis-preview-bay");
+  const statusLcd = document.getElementById("preview-status-lcd");
+
+  // Neon range slider inputs and LCD labels
+  const ageSlider = document.getElementById("gen-age-slider");
+  const ageLcd = document.getElementById("lcd-age-text");
+  const ageLabels = {
+    1: "青年待業期 (20-29 歲)",
+    2: "中年轉型期 (30-49 歲)",
+    3: "高齡致殘期 (50-62 歲)"
+  };
+  ageSlider.addEventListener("input", (e) => {
+    ageLcd.textContent = ageLabels[e.target.value];
+  });
+
+  const motSlider = document.getElementById("gen-motivation-slider");
+  const motLcd = document.getElementById("lcd-motivation-text");
+  const motLabels = {
+    1: "極低動機 (抗拒與嚴重逃避期)",
+    2: "中等動機 (糾結與矛盾想求變)",
+    3: "良好動機 (準備求職與接受訓練)"
+  };
+  motSlider.addEventListener("input", (e) => {
+    motLcd.textContent = motLabels[e.target.value];
+  });
+
+  const stageSlider = document.getElementById("gen-stage-slider");
+  const stageLcd = document.getElementById("lcd-stage-text");
+  const stageLabels = {
+    1: "意圖準備前階段 (拒絕考慮就業)",
+    2: "意圖階段 (想改變但重度焦慮)",
+    3: "準備與行動階段 (已面試或培訓)"
+  };
+  stageSlider.addEventListener("input", (e) => {
+    stageLcd.textContent = stageLabels[e.target.value];
+  });
+
+  // Disability hex gene slots click toggling
+  const geneChips = container.querySelectorAll(".gene-slot-card");
+  let selectedDisability = "肢體傷殘 (如肢體偏癱或脊髓損傷)";
+  
+  geneChips.forEach(chip => {
+    chip.addEventListener("click", () => {
+      geneChips.forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      selectedDisability = chip.getAttribute("data-value");
+      AudioSynth.playClick();
+    });
+  });
+
+  // Import code handler
+  const importBtn = document.getElementById("synthesis-import-btn");
+  if (importBtn) {
+    importBtn.addEventListener("click", () => {
+      const codeInput = document.getElementById("synthesis-import-code");
+      const code = codeInput ? codeInput.value.trim() : "";
+      if (!code) {
+        alert("請先貼上有效的基因分享碼！");
+        return;
+      }
       try {
-        const generatedOnly = state.cases.filter(c => c.id.startsWith("generated_") || c.id.startsWith("custom_"));
-        localStorage.setItem("rehab_custom_cases", JSON.stringify(generatedOnly));
-        RehabCounselorDB.saveCustomCase(customCase);
-      } catch (e) {}
+        const decoded = JSON.parse(decodeURIComponent(atob(code)));
+        if (!decoded.id || !decoded.name) {
+          throw new Error("無效的個案基因數據結構");
+        }
+        decoded.id = `imported_${Date.now()}`;
+        state.cases.unshift(decoded);
+        RehabCounselorDB.saveCustomCase(decoded);
+        AudioSynth.playUnlock();
+        alert(`🎉 成功導入個案「${decoded.name}」！已寫入實戰大廳。`);
+        renderCaseCatalog(container, switchViewCallback);
+      } catch (err) {
+        AudioSynth.playError();
+        alert(`基因碼導入失敗：${err.message}`);
+      }
+    });
+  }
 
-      AudioSynth.playSuccess();
-      checkAndUnlockAchievements("case_creator");
-      startRoleplaySession(customCase, switchViewCallback);
-    } catch (err) {
+  // Handle Form Submission for AI Case Synthesis
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    AudioSynth.playClick();
+
+    const disabilityType = selectedDisability;
+    const ageGroup = ageLabels[ageSlider.value];
+    const motivationLevel = motLabels[motSlider.value];
+    const motivationStage = stageLabels[stageSlider.value];
+
+    statusLcd.textContent = "SYS.SEQUENCING";
+    statusLcd.style.color = "var(--accent-cyan)";
+
+    // Replace preview screen with animated genetic sequencing HUD
+    previewBay.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(6, 182, 212, 0.15); padding-bottom:8px;">
+        <span style="font-size:0.75rem; font-weight:800; color:var(--accent-cyan); letter-spacing:0.5px;">
+          <i class="fa-solid fa-dna fa-spin" style="color:var(--accent-cyan)"></i> 基因鏈重組中 (Sequencing)
+        </span>
+        <span class="lcd-digital-badge" id="hud-percentage">0%</span>
+      </div>
+
+      <div class="synthesis-loading-hud" style="padding: 20px 0; gap: 20px; flex-grow:1; display:flex; flex-direction:column; justify-content:center;">
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:6px; color:var(--text-bright);">
+            <span id="synthesis-progress-title">初始化神經元連接...</span>
+            <span id="synthesis-progress-pct" style="color:var(--accent-cyan); font-weight:800;">0%</span>
+          </div>
+          <div class="synthesis-progress-track" style="height:8px; background:var(--nested-bg-darkest); border-radius:4px; overflow:hidden; border:1px solid var(--card-border);">
+            <div class="synthesis-progress-bar" id="synthesis-progress-bar" style="width:0%; height:100%; background:linear-gradient(90deg, var(--accent-cyan), var(--accent-purple)); transition:width 0.1s ease;"></div>
+          </div>
+        </div>
+
+        <div class="hud-log-stream" id="synthesis-inner-log" style="height:120px; font-size:0.72rem; overflow-y:auto;">
+          <p><i class="fa-solid fa-play" style="color:var(--accent-cyan);"></i> 啟動生命特徵合成艙協議...</p>
+        </div>
+      </div>
+    `;
+
+    const barFill = document.getElementById("synthesis-progress-bar");
+    const percentageText = document.getElementById("hud-percentage");
+    const pctText = document.getElementById("synthesis-progress-pct");
+    const progressTitle = document.getElementById("synthesis-progress-title");
+    const innerLog = document.getElementById("synthesis-inner-log");
+
+    const addInnerLog = (text) => {
+      const p = document.createElement("p");
+      p.innerHTML = text;
+      innerLog.appendChild(p);
+      innerLog.scrollTop = innerLog.scrollHeight;
+      AudioSynth.playPulse();
+    };
+
+    let geminiResult = null;
+    let geminiError = null;
+
+    generateCustomCase(state.apiKey, state.selectedModel, {
+      disabilityType,
+      ageGroup,
+      motivationLevel,
+      motivationStage
+    }).then(res => {
+      geminiResult = res;
+    }).catch(err => {
+      geminiError = err;
+    });
+
+    let progress = 0;
+    const steps = [
+      { p: 15, log: `🧬 提取病理特徵與職業功能受損基因...`, title: "DNA 生物病理提取..." },
+      { p: 48, log: `🌐 合成地道香港社會關係網與環境福利...`, title: "編排香港本土環境因素..." },
+      { p: 68, log: `📊 計算全套 ICF 全人評估六維矩陣...`, title: "生成 ICF 生物心理社會矩陣..." },
+      { p: 85, log: `💬 轉譯地道廣東話抗拒心理對話串流...`, title: "編寫港式對白與口訣..." },
+      { p: 95, log: `⚙️ API 對話通道與 UI 渲染線程對接...`, title: "建立就業對話系統通道..." },
+      { p: 99, log: `⏳ 等待 Gemini 智慧核准基因確認訊號...`, title: "等待 API 最終響應..." }
+    ];
+
+    let currentStepIdx = 0;
+    
+    const timer = setInterval(() => {
+      if (geminiError) {
+        clearInterval(timer);
+        renderError(geminiError.message);
+        return;
+      }
+
+      if (progress < 99) {
+        progress += 1;
+        barFill.style.width = `${progress}%`;
+        percentageText.textContent = `${progress}%`;
+        if (pctText) pctText.textContent = `${progress}%`;
+        
+        if (currentStepIdx < steps.length && progress >= steps[currentStepIdx].p) {
+          const step = steps[currentStepIdx];
+          progressTitle.textContent = step.title;
+          addInnerLog(step.log);
+          currentStepIdx++;
+        }
+      } else {
+        if (geminiResult) {
+          clearInterval(timer);
+          progress = 100;
+          barFill.style.width = `100%`;
+          percentageText.textContent = `100%`;
+          if (pctText) pctText.textContent = `100%`;
+          progressTitle.textContent = "個案基因特徵合成成功！";
+          addInnerLog(`⚡ 合成成功！基因序列已完全就緒。`);
+          AudioSynth.playUnlock();
+          
+          setTimeout(async () => {
+            geminiResult.category = disabilityType;
+            
+            // Preview container with Matrix scrambling decryption effects
+            previewBay.innerHTML = `
+              <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(6, 182, 212, 0.15); padding-bottom:8px; margin-bottom:12px;">
+                <span style="font-size:0.75rem; font-weight:800; color:var(--accent-green); letter-spacing:0.5px;">
+                  <i class="fa-solid fa-circle-check" style="color:var(--accent-green)"></i> 合成核准防偽預覽 (Gen Preview)
+                </span>
+                <span class="lcd-digital-badge" style="color:var(--accent-green); border-color:rgba(16,185,129,0.3); background:rgba(16,185,129,0.05);">GEN.APPROVED</span>
+              </div>
+
+              <!-- Premium custom card visual layout preview -->
+              <div class="gen-preview-badge" style="flex-grow:1; display:flex; flex-direction:column; justify-content:space-between; padding:12px 16px; margin:0; background:var(--nested-bg-darkest);">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <span style="font-size:1.8rem; background:rgba(6,182,212,0.1); border:1px solid rgba(6,182,212,0.2); width:40px; height:40px; border-radius:8px; display:inline-flex; align-items:center; justify-content:center;">
+                      ${geminiResult.avatar || "👤"}
+                    </span>
+                    <span class="lcd-digital-badge" id="decrypted-age" style="font-size:0.72rem; padding:1px 6px;">[解碼中]</span>
+                  </div>
+
+                  <h4 style="font-size:1.15rem; font-weight:900; color:var(--text-bright); margin:0 0 6px 0;" id="decrypted-name">[解碼中]</h4>
+                  <p style="font-size:0.78rem; color:var(--accent-cyan); margin:0 0 10px 0; line-height:1.3;" id="decrypted-diag">[解碼中]</p>
+                  
+                  <div style="border-top:1px dashed rgba(255,255,255,0.08); padding-top:8px; font-size:0.75rem; line-height:1.4; color:var(--text-main); font-style:italic;" id="decrypted-quote">
+                    [解碼中]
+                  </div>
+                </div>
+
+                <div style="display:grid; grid-template-columns: 1.15fr 0.85fr; gap:10px; margin-top:14px;">
+                  <button class="btn btn-primary" id="btn-write-to-lobby" style="font-size:0.78rem; padding:8px 0; justify-content:center; display:none;"><i class="fa-solid fa-clipboard-check"></i> 寫入大廳</button>
+                  <button class="btn btn-share-case" id="btn-gen-preview-enter" style="font-size:0.78rem; padding:8px 0; justify-content:center; display:none; background:transparent; border-color:rgba(255,255,255,0.15);"><i class="fa-solid fa-comments"></i> 進入輔導</button>
+                </div>
+              </div>
+            `;
+
+            // Run decrypting typewriter scrambling effects on newly created data
+            await runDecryptionAnimation("decrypted-name", geminiResult.name);
+            await runDecryptionAnimation("decrypted-age", `${geminiResult.age}歲 / ${geminiResult.gender}`);
+            await runDecryptionAnimation("decrypted-diag", `🧬 診斷：${geminiResult.health_condition}`);
+            await runDecryptionAnimation("decrypted-quote", `🗣️ 地道抗拒對白：\n"${geminiResult.initial_dialogue}"`);
+
+            // Reveal action buttons
+            const writeBtn = document.getElementById("btn-write-to-lobby");
+            const enterBtn = document.getElementById("btn-gen-preview-enter");
+            
+            writeBtn.style.display = "inline-flex";
+            enterBtn.style.display = "inline-flex";
+
+            writeBtn.addEventListener("click", (e) => {
+              const rect = e.target.getBoundingClientRect();
+              triggerConfetti(rect.left + 40, rect.top + window.scrollY);
+
+              if (!state.cases.some(c => c.id === geminiResult.id)) {
+                state.cases.unshift(geminiResult);
+              }
+              try {
+                const customOnly = state.cases.filter(c => !["case_01", "case_02", "case_03", "case_04"].includes(c.id));
+                localStorage.setItem("rehab_custom_cases", JSON.stringify(customOnly));
+                RehabCounselorDB.saveCustomCase(geminiResult);
+              } catch(e) {}
+              checkAndUnlockAchievements("case_creator");
+              AudioSynth.playSuccess();
+              alert(`🎉 個案「${geminiResult.name}」已順利寫入大廳首位！`);
+              
+              const catalogBtn = document.getElementById("view-cases-catalog-btn");
+              if (catalogBtn) catalogBtn.click();
+            });
+
+            enterBtn.addEventListener("click", (e) => {
+              const rect = e.target.getBoundingClientRect();
+              triggerConfetti(rect.left + 40, rect.top + window.scrollY);
+
+              if (!state.cases.some(c => c.id === geminiResult.id)) {
+                state.cases.unshift(geminiResult);
+              }
+              try {
+                const customOnly = state.cases.filter(c => !["case_01", "case_02", "case_03", "case_04"].includes(c.id));
+                localStorage.setItem("rehab_custom_cases", JSON.stringify(customOnly));
+                RehabCounselorDB.saveCustomCase(geminiResult);
+              } catch(e) {}
+              checkAndUnlockAchievements("case_creator");
+              AudioSynth.playSuccess();
+              startRoleplaySession(geminiResult, switchViewCallback);
+            });
+
+          }, 600);
+        }
+      }
+    }, 60);
+
+    function renderError(errMsg) {
+      statusLcd.textContent = "GEN.ERROR";
       AudioSynth.playError();
-      alert(`個案生成失敗：${err.message}`);
-      btn.disabled = false;
-      btn.innerHTML = `<i class="fa-solid fa-atom"></i> 開始 AI 智能生成個案`;
+      previewBay.innerHTML = `
+        <h3 style="color:var(--accent-rose); font-size:1.15rem; font-weight:800; border-bottom:1px solid rgba(244,63,94,0.15); padding-bottom:8px;"><i class="fa-solid fa-triangle-exclamation"></i> 個案合成失敗</h3>
+        <p style="color:var(--text-muted); font-size:0.8rem; margin:10px 0;">生命艙出現系統性拒絕或 API 連線中斷：</p>
+        <div style="background:rgba(244,63,94,0.06); padding:12px; border-radius:10px; border-left:4px solid var(--accent-rose); color:var(--text-bright); font-family:monospace; font-size:0.78rem; margin-bottom:20px; white-space:pre-wrap; max-height:160px; overflow-y:auto; line-height:1.4;">${errMsg}</div>
+        <button class="btn btn-primary" id="btn-synthesis-retry" style="width:100%; justify-content:center;"><i class="fa-solid fa-rotate-left"></i> 重新進入生命艙</button>
+      `;
+      
+      document.getElementById("btn-synthesis-retry").addEventListener("click", () => {
+        renderCaseGenerator(container, switchViewCallback);
+      });
     }
   });
 }
