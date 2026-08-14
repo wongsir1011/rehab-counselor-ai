@@ -3,6 +3,17 @@
 import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260724_v13_1";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260724_v13_1";
 
+// Global Case Avatar Sanitizer (確保頭像為標準 Emoji，避免 URL 溢出)
+function sanitizeCaseAvatar(c) {
+  if (!c) return c;
+  if (!c.avatar || typeof c.avatar !== "string" || c.avatar.startsWith("http://") || c.avatar.startsWith("https://") || c.avatar.startsWith("/") || c.avatar.includes(".com") || c.avatar.includes(".png") || c.avatar.includes(".jpg") || c.avatar.includes("avatar/") || c.avatar.length > 8) {
+    const isFemale = c.gender === "女" || c.gender === "Female" || (c.gender && c.gender.includes("女"));
+    const isSenior = c.age && c.age >= 50;
+    c.avatar = isFemale ? (isSenior ? "👵" : "👩") : (isSenior ? "👴" : "👨");
+  }
+  return c;
+}
+
 // Global App State
 const state = {
   activeView: "dashboard",
@@ -15,12 +26,14 @@ const state = {
     if (localCustom) {
       try {
         const parsed = JSON.parse(localCustom);
-        return [...parsed, ...MOCK_CASES];
+        const sanitized = Array.isArray(parsed) ? parsed.map(sanitizeCaseAvatar) : [];
+        try { localStorage.setItem("rehab_custom_cases", JSON.stringify(sanitized)); } catch (e) {}
+        return [...sanitized, ...MOCK_CASES.map(sanitizeCaseAvatar)];
       } catch (e) {
-        return [...MOCK_CASES];
+        return [...MOCK_CASES.map(sanitizeCaseAvatar)];
       }
     }
-    return [...MOCK_CASES];
+    return [...MOCK_CASES.map(sanitizeCaseAvatar)];
   })(),
   activeCase: null,
   activeSession: null, // { history: [], notes: { soap: "", icf: "" }, report: null }
@@ -2395,7 +2408,7 @@ function renderCaseCatalog(container) {
           ${isCustom ? `<div class="dossier-tag-custom"><i class="fa-solid fa-sparkles"></i> AI 基因合成</div>` : ""}
           <div style="transform-style: preserve-3d;">
             <div class="dossier-header" style="transform-style: preserve-3d;">
-              <div class="dossier-avatar-container">${c.avatar || "👤"}</div>
+              <div class="dossier-avatar-container">${sanitizeCaseAvatar(c).avatar || "👤"}</div>
               <span class="dossier-badge-glow">${c.age}歲 / ${c.gender}</span>
             </div>
             

@@ -314,7 +314,13 @@ export async function generateCustomCase(apiKey, model, options) {
 
   try {
     const rawText = await callGeminiAPI(apiKey, model, systemInstruction, prompt, [], true);
-    return parseFlexibleJson(rawText);
+    const parsed = parseFlexibleJson(rawText);
+    if (!parsed.avatar || typeof parsed.avatar !== "string" || parsed.avatar.startsWith("http") || parsed.avatar.includes(".com") || parsed.avatar.includes(".png") || parsed.avatar.length > 8) {
+      const isFemale = parsed.gender === "女" || parsed.gender === "Female";
+      const isSenior = parsed.age && parsed.age >= 50;
+      parsed.avatar = isFemale ? (isSenior ? "👵" : "👩") : (isSenior ? "👴" : "👨");
+    }
+    return parsed;
   } catch (error) {
     console.error("Failed to generate custom case:", error);
     throw error;
