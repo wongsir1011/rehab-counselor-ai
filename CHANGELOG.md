@@ -4,6 +4,31 @@
 
 ---
 
+## [v20260815_v15_milestone1] - 2026-08-15T00:52:03+08:00 (香港時間 UTC+8)
+
+### 🎙️ Milestone 1 交付：連續廣東話語音辨識與 MiniMax 雙引擎神經語音 (Milestone 1 Delivered)
+*   **連續廣東話語音辨識升級 (Continuous STT with Pause Recovery)**：
+    *   在 `app.js` 的 `initVoiceRecognition` 中實裝思考停頓自動重連機制與語句累積拼接器。同工在說話過程中即使停頓 2~3 秒組織臨床語句，麥克風亦不會意外關閉。
+*   **MiniMax 廣東話神經語音雙引擎路由器 (Dual-Engine Cantonese TTS)**：
+    *   在 `app.js` 中實裝 `fetchMiniMaxTTSAudio` 與 `speakCantonese` 雙引擎路由器，支援 MiniMax 國際版與國內版 REST API v2。
+    *   實裝**案主性別聲線自動綁定**：男案主（如阿強）自動調用 `cantonese_male`，女案主（如雅婷）自動調用 `cantonese_female`，徹底解決性別音色不符問題。
+    *   實裝**零丟失平滑降級**：在網絡異常、金鑰未配置或調用超時時，自動無縫回退至原生 Web Speech 廣東話語音。
+*   **全局設定頁面與即時診斷功能 (Settings & Voice Test)**：
+    *   新增 MiniMax API Key、Group ID、男/女聲線選擇面板。
+    *   新增「🔊 測試 MiniMax 廣東話發音」按鈕，提供即時連線診斷與音訊試聽反饋。
+
+---
+
+## [v20260815_v14_ssot] - 2026-08-15T00:44:54+08:00 (香港時間 UTC+8)
+
+### 🏛️ 核心架構與 SSOT 支柱文檔建立 (Architecture & Living Docs SSOT)
+*   **PRD.md (Intent SSOT)**：建立正式產品需求規格書（v1），鎖定核心北極星指標、香港職業復康同工使用者旅程、嚴格約束條件（單用戶本地隱私架構、連續廣東話語音辨識、MiniMax 廣東話神經語音與單次結構化 API）。
+*   **ARCHITECTURE.md (Code Behavior SSOT)**：建立系統架構文檔，詳解單體 SPA 控制器、Gemini 結構化 API 網關、雙引擎語音路由器、ACT/MI/ICF 臨床理論矩陣與數據流向。
+*   **DECISIONS.md & adr/ (Decisions History SSOT)**：建立輕量決策索引與 5 份架構決策紀錄（ADR-0001 至 ADR-0005），涵蓋客戶端本地優先架構、單次結構化輸出、雙引擎 TTS 路由、連續 STT 與 IndexedDB 本地保險箱。
+*   **Product_Roadmap.md & plan/ (Roadmap & Build Plans)**：建立產品路線圖與四大里程碑執行計劃（Milestone 1 至 4），精確對齊 PRD 每一條使用者旅程。
+
+---
+
 ## [v20260601_v12] - 2026-06-01T23:49:20+08:00 (香港時間 UTC+8)
 
 ### 🔧 故障修復與安全防禦 (Fixed)
