@@ -3816,6 +3816,7 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
               model: modelName,
               text: text,
               stream: false,
+              language_boost: "Chinese,Yue",
               voice_setting: {
                 voice_id: curVoice,
                 speed: 1.0,
