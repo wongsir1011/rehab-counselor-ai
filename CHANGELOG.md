@@ -4,6 +4,21 @@
 
 ---
 
+## [v20260815_v15_milestone1] - 2026-08-15T00:52:03+08:00 (香港時間 UTC+8)
+
+### 🎙️ Milestone 1 交付：連續廣東話語音辨識與 MiniMax 雙引擎神經語音 (Milestone 1 Delivered)
+*   **連續廣東話語音辨識升級 (Continuous STT with Pause Recovery)**：
+    *   在 `app.js` 的 `initVoiceRecognition` 中實裝思考停頓自動重連機制與語句累積拼接器。同工在說話過程中即使停頓 2~3 秒組織臨床語句，麥克風亦不會意外關閉。
+*   **MiniMax 廣東話神經語音雙引擎路由器 (Dual-Engine Cantonese TTS)**：
+    *   在 `app.js` 中實裝 `fetchMiniMaxTTSAudio` 與 `speakCantonese` 雙引擎路由器，支援 MiniMax 國際版與國內版 REST API v2。
+    *   實裝**案主性別聲線自動綁定**：男案主（如阿強）自動調用 `cantonese_male`，女案主（如雅婷）自動調用 `cantonese_female`，徹底解決性別音色不符問題。
+    *   實裝**零丟失平滑降級**：在網絡異常、金鑰未配置或調用超時時，自動無縫回退至原生 Web Speech 廣東話語音。
+*   **全局設定頁面與即時診斷功能 (Settings & Voice Test)**：
+    *   新增 MiniMax API Key、Group ID、男/女聲線選擇面板。
+    *   新增「🔊 測試 MiniMax 廣東話發音」按鈕，提供即時連線診斷與音訊試聽反饋。
+
+---
+
 ## [v20260815_v14_ssot] - 2026-08-15T00:44:54+08:00 (香港時間 UTC+8)
 
 ### 🏛️ 核心架構與 SSOT 支柱文檔建立 (Architecture & Living Docs SSOT)
