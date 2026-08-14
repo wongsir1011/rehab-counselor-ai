@@ -281,6 +281,9 @@ export async function generateCustomCase(apiKey, model, options) {
   const systemInstruction = `
 你是一位職業復康專家。你需要生成一個高度逼真、符合香港本地背景的殘疾人士或長期病患者職業復康個案。
 個案必須具有深度，適合社會工作者或輔導員進行 ACT, MI 及 ICF 實戰培訓。
+
+【重要格式規則】：
+- avatar 欄位必須為單個代表案主職業或性別特徵的 Emoji 符號（例如 👨‍✈️, 👨‍🦽, 👩‍🦼, 🧑‍💻, 👨‍💼, 👩‍🍳, 👨‍🔧, 👨, 👩），絕對不要輸出任何 URL 網址、圖片連結或英文文字！
 `;
 
   const prompt = `請根據以下設定，為我生成一個職業復康個案：
@@ -296,7 +299,7 @@ export async function generateCustomCase(apiKey, model, options) {
     properties: {
       id: { type: "STRING" },
       name: { type: "STRING" },
-      avatar: { type: "STRING" },
+      avatar: { type: "STRING", description: "單個合適的人物 Emoji 表情符號，嚴禁包含任何 URL 網址" },
       age: { type: "INTEGER" },
       gender: { type: "STRING" },
       health_condition: { type: "STRING" },
@@ -322,7 +325,16 @@ export async function generateCustomCase(apiKey, model, options) {
 
   try {
     const rawText = await callGeminiAPI(apiKey, model, systemInstruction, prompt, [], true, caseSchema);
-    return parseFlexibleJson(rawText);
+    const parsed = parseFlexibleJson(rawText);
+    
+    // Sanitize avatar to ensure it is never a URL string
+    if (!parsed.avatar || typeof parsed.avatar !== "string" || parsed.avatar.startsWith("http") || parsed.avatar.includes(".com") || parsed.avatar.includes(".png") || parsed.avatar.length > 8) {
+      const isFemale = parsed.gender === "女" || parsed.gender === "Female";
+      const isSenior = parsed.age && parsed.age >= 50;
+      parsed.avatar = isFemale ? (isSenior ? "👵" : "👩") : (isSenior ? "👴" : "👨");
+    }
+    
+    return parsed;
   } catch (error) {
     console.error("Failed to generate custom case:", error);
     throw error;

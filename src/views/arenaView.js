@@ -1,4 +1,4 @@
-import { state, checkAndUnlockAchievements } from "../core/state.js";
+import { state, checkAndUnlockAchievements, sanitizeCaseAvatar } from "../core/state.js";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateSoapSuggestions } from "../services/geminiService.js";
 import { speakCantonese, initVoiceRecognition, stopRecording } from "../core/speechEngine.js";
 import { AudioSynth } from "../core/audioSynth.js";
@@ -234,7 +234,7 @@ export function renderCaseCatalog(container, switchViewCallback) {
           ${isCustom ? `<div class="dossier-tag-custom"><i class="fa-solid fa-sparkles"></i> AI 基因合成</div>` : ""}
           <div style="transform-style: preserve-3d;">
             <div class="dossier-header" style="transform-style: preserve-3d;">
-              <div class="dossier-avatar-container">${c.avatar || "👤"}</div>
+              <div class="dossier-avatar-container">${sanitizeCaseAvatar(c).avatar || "👤"}</div>
               <span class="dossier-badge-glow">${c.age}歲 / ${c.gender}</span>
             </div>
             

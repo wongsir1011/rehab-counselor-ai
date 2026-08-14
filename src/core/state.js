@@ -3,6 +3,19 @@
 import { MOCK_CASES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "../data/mockData.js";
 import { RehabCounselorDB } from "../utils/db.js";
 
+/**
+ * 清理並校正個案頭像 (確保為單個 Emoji，移除任何 URL 網址溢出)
+ */
+export function sanitizeCaseAvatar(c) {
+  if (!c) return c;
+  if (!c.avatar || typeof c.avatar !== "string" || c.avatar.startsWith("http://") || c.avatar.startsWith("https://") || c.avatar.startsWith("/") || c.avatar.includes(".com") || c.avatar.includes(".png") || c.avatar.includes(".jpg") || c.avatar.includes("avatar/") || c.avatar.length > 8) {
+    const isFemale = c.gender === "女" || c.gender === "Female" || (c.gender && c.gender.includes("女"));
+    const isSenior = c.age && c.age >= 50;
+    c.avatar = isFemale ? (isSenior ? "👵" : "👩") : (isSenior ? "👴" : "👨");
+  }
+  return c;
+}
+
 export const state = {
   activeView: "dashboard",
   theme: "dark",
@@ -14,12 +27,15 @@ export const state = {
     if (localCustom) {
       try {
         const parsed = JSON.parse(localCustom);
-        return [...parsed, ...MOCK_CASES];
+        const sanitized = Array.isArray(parsed) ? parsed.map(sanitizeCaseAvatar) : [];
+        // Write back sanitized list to prevent future url overflows
+        try { localStorage.setItem("rehab_custom_cases", JSON.stringify(sanitized)); } catch (e) {}
+        return [...sanitized, ...MOCK_CASES.map(sanitizeCaseAvatar)];
       } catch (e) {
-        return [...MOCK_CASES];
+        return [...MOCK_CASES.map(sanitizeCaseAvatar)];
       }
     }
-    return [...MOCK_CASES];
+    return [...MOCK_CASES.map(sanitizeCaseAvatar)];
   })(),
   activeCase: null,
   activeSession: null,
@@ -75,7 +91,8 @@ export async function initPersistenceDB() {
     await RehabCounselorDB.migrateFromLocalStorage();
     const customCases = await RehabCounselorDB.getAllCustomCases();
     if (customCases.length > 0) {
-      state.cases = [...customCases, ...MOCK_CASES.filter(mc => !customCases.some(cc => cc.id === mc.id))];
+      const sanitizedCustom = customCases.map(sanitizeCaseAvatar);
+      state.cases = [...sanitizedCustom, ...MOCK_CASES.filter(mc => !sanitizedCustom.some(cc => cc.id === mc.id)).map(sanitizeCaseAvatar)];
     }
   } catch (err) {
     console.warn("initPersistenceDB warning:", err);
