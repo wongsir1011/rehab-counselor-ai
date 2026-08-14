@@ -3753,17 +3753,10 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
     : `**** (長度: ${cleanKey.length})`;
   appendMiniMaxLog(`🔑 金鑰特徵：${maskedKey}`);
 
-  // 1. 特殊金鑰類型即時檢測：Coding Plan 代碼專用金鑰 (sk-cp-)
-  if (cleanKey.startsWith("sk-cp-") || cleanKey.startsWith("sk-coding-")) {
-    appendMiniMaxLog("⚠️ 發現金鑰以 sk-cp- 開頭（MiniMax Coding Plan 訂閱專用金鑰）！");
-    appendMiniMaxLog("🛑 失敗原因：MiniMax 官方規定 Coding Plan 金鑰僅開放文字補全接口，未開通語音合成 (T2A) 權限，伺服器將拒絕請求 (2049)。");
-    throw new Error(`檢測到你輸入的是 MiniMax Coding Plan 金鑰 (以 sk-cp- 開頭)。\n\n📌 官方權限限制說明：MiniMax 官方的 Coding Plan 訂閱僅開放「大語言模型代碼生成」權限，並不包含「語音合成 (TTS)」功能。若發送語音請求，MiniMax 伺服器會強制返回 2049 (Invalid API Key)。\n\n💡 解決方案：\n1. 請在 MiniMax 開放平台 (platform.minimax.io 或 platform.minimaxi.com) 領取標準開放平台 API Key；或\n2. 於設定中切換為【系統原生語音 (免費 / 免金鑰)】，即可立即開始無障礙廣東話實戰練習！`);
-  }
-
   if (autoGid) {
     appendMiniMaxLog(`🔍 從 JWT 金鑰 Payload 中自動解析出 Group ID: ${autoGid}`);
   } else if (cleanKey.startsWith("sk-")) {
-    appendMiniMaxLog(`ℹ️ 金鑰為 sk- 標準格式 (非 JWT)`);
+    appendMiniMaxLog(`ℹ️ 金鑰為 sk- 標準格式 (國內版 / 國際版開放平台 API Key)`);
   }
 
   // 整理候選 Group ID 優先級
