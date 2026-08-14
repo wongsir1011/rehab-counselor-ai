@@ -4,6 +4,16 @@
 
 ---
 
+## [v20260815_v14_ssot] - 2026-08-15T00:44:54+08:00 (香港時間 UTC+8)
+
+### 🏛️ 核心架構與 SSOT 支柱文檔建立 (Architecture & Living Docs SSOT)
+*   **PRD.md (Intent SSOT)**：建立正式產品需求規格書（v1），鎖定核心北極星指標、香港職業復康同工使用者旅程、嚴格約束條件（單用戶本地隱私架構、連續廣東話語音辨識、MiniMax 廣東話神經語音與單次結構化 API）。
+*   **ARCHITECTURE.md (Code Behavior SSOT)**：建立系統架構文檔，詳解單體 SPA 控制器、Gemini 結構化 API 網關、雙引擎語音路由器、ACT/MI/ICF 臨床理論矩陣與數據流向。
+*   **DECISIONS.md & adr/ (Decisions History SSOT)**：建立輕量決策索引與 5 份架構決策紀錄（ADR-0001 至 ADR-0005），涵蓋客戶端本地優先架構、單次結構化輸出、雙引擎 TTS 路由、連續 STT 與 IndexedDB 本地保險箱。
+*   **Product_Roadmap.md & plan/ (Roadmap & Build Plans)**：建立產品路線圖與四大里程碑執行計劃（Milestone 1 至 4），精確對齊 PRD 每一條使用者旅程。
+
+---
+
 ## [v20260601_v12] - 2026-06-01T23:49:20+08:00 (香港時間 UTC+8)
 
 ### 🔧 故障修復與安全防禦 (Fixed)

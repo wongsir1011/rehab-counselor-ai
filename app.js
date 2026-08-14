@@ -31,6 +31,12 @@ const state = {
   activeHexaNode: "acceptance",
   voices: [],
   selectedVoiceName: localStorage.getItem("rehab_selected_voice") || "",
+  ttsEngine: localStorage.getItem("rehab_tts_engine") || "system", // "system", "minimax-global", "minimax-cn"
+  minimaxApiKey: localStorage.getItem("rehab_minimax_api_key") || "",
+  minimaxGroupId: localStorage.getItem("rehab_minimax_group_id") || "",
+  minimaxMaleTimbre: localStorage.getItem("rehab_minimax_male_timbre") || "cantonese_male",
+  minimaxFemaleTimbre: localStorage.getItem("rehab_minimax_female_timbre") || "cantonese_female",
+  activeAudioElement: null,
   quoteIntervalId: null,   // 追蹤激勵金句定時器
   mysteryTimeoutId: null,   // 追蹤盲盒轉場定時器
   // Phase 4: Local Storage and STT State
@@ -3231,8 +3237,6 @@ function startRoleplaySession(selectedCase) {
           </div>
 
           <!-- Content Scroll Area -->
-          <div style="flex:1; overflow-y:auto; padding-right:4px; display:flex; flex-direction:column;">
-            
             <!-- Tab 1: SOAP Suggestions -->
             <div id="rp-drawer-content-soap" style="display:flex; flex-direction:column; gap:10px;">
               <h4 class="soap-drawer-title"><i class="fa-solid fa-robot"></i> AI SOAP 建議助手</h4>
@@ -3654,25 +3658,184 @@ function clearAllSpeakingStates() {
     avatar.classList.remove("speaking-pulse");
   }
   state.activeUtterance = null;
+  if (state.activeAudioElement) {
+    try {
+      state.activeAudioElement.pause();
+      state.activeAudioElement.currentTime = 0;
+    } catch (e) {}
+    state.activeAudioElement = null;
+  }
 }
 
-function speakCantonese(text, bubbleEl = null, forcePlay = false) {
-  // 停止正在播的語音並還原樣式
+/**
+ * 輔助函數：將 Hex 編碼或 Base64 字串轉換為 Uint8Array 位元組陣列
+ */
+function hexToUint8Array(hexString) {
+  if (!hexString || typeof hexString !== "string") return null;
+  if (!/^[0-9a-fA-F]+$/.test(hexString) || hexString.length % 2 !== 0) {
+    try {
+      const binaryString = atob(hexString);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes;
+    } catch (e) {
+      return null;
+    }
+  }
+  const bytes = new Uint8Array(hexString.length / 2);
+  for (let i = 0; i < hexString.length; i += 2) {
+    bytes[i / 2] = parseInt(hexString.substr(i, 2), 16);
+  }
+  return bytes;
+}
+
+/**
+ * MiniMax 廣東話神經語音合成 API (REST API v2)
+ */
+async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false) {
+  const baseUrl = isCn ? "https://api.minimaxi.chat/v1/t2a_v2" : "https://api.minimax.chat/v1/t2a_v2";
+  const url = groupId ? `${baseUrl}?GroupId=${encodeURIComponent(groupId)}` : baseUrl;
+  
+  const payload = {
+    model: "speech-01-turbo",
+    text: text,
+    stream: false,
+    voice_setting: {
+      voice_id: voiceId || "cantonese_male",
+      speed: 1.0,
+      vol: 1.0,
+      pitch: 0
+    },
+    audio_setting: {
+      sample_rate: 32000,
+      bitrate: 128000,
+      format: "mp3",
+      channel: 1
+    }
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`MiniMax API HTTP ${response.status}: ${errText}`);
+  }
+
+  const result = await response.json();
+  if (result.base_resp && result.base_resp.status_code !== 0) {
+    throw new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
+  }
+
+  if (!result.data || !result.data.audio) {
+    throw new Error("MiniMax API did not return audio payload");
+  }
+
+  const audioBytes = hexToUint8Array(result.data.audio);
+  if (!audioBytes) {
+    throw new Error("Failed to decode MiniMax audio bytes");
+  }
+
+  const blob = new Blob([audioBytes], { type: "audio/mp3" });
+  return URL.createObjectURL(blob);
+}
+
+/**
+ * 廣東話雙引擎語音朗讀路由器 (MiniMax Neural TTS + Native Web Speech Fallback)
+ */
+async function speakCantonese(text, bubbleEl = null, forcePlay = false) {
+  // 停止正在播放的所有語音
   if (typeof window !== "undefined" && window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
+  if (state.activeAudioElement) {
+    try {
+      state.activeAudioElement.pause();
+      state.activeAudioElement.currentTime = 0;
+    } catch (e) {}
+    state.activeAudioElement = null;
+  }
   clearAllSpeakingStates();
   
-  // 若為自動朗讀且用戶開啟了靜音，直接返回
   if (state.isSpeechMuted && !forcePlay) {
     return;
   }
   
-  const cleanText = text.replace(/【.*】/g, "").trim(); // 過濾督導提示字元
+  const cleanText = text.replace(/【.*】/g, "").replace(/\（.*?\）/g, "").replace(/\(.*?\)/g, "").trim();
+  if (!cleanText) return;
+
+  const isFemaleCase = state.activeCase && (state.activeCase.gender === "女" || state.activeCase.gender === "Female");
+
+  // 1. 如果啟用了 MiniMax 且已配置 API Key，優先使用 MiniMax 高品質廣東話
+  if (state.ttsEngine && state.ttsEngine.startsWith("minimax") && state.minimaxApiKey) {
+    const isCn = state.ttsEngine === "minimax-cn";
+    const voiceId = isFemaleCase 
+      ? (state.minimaxFemaleTimbre || "cantonese_female") 
+      : (state.minimaxMaleTimbre || "cantonese_male");
+
+    try {
+      if (bubbleEl) bubbleEl.classList.add("is-speaking");
+      const avatar = document.getElementById("rp-active-avatar");
+      if (avatar) avatar.classList.add("speaking-pulse");
+
+      const audioUrl = await fetchMiniMaxTTSAudio(
+        cleanText,
+        voiceId,
+        state.minimaxApiKey,
+        state.minimaxGroupId,
+        isCn
+      );
+
+      const audio = new Audio(audioUrl);
+      state.activeAudioElement = audio;
+
+      audio.onended = () => {
+        if (state.activeAudioElement === audio) {
+          state.activeAudioElement = null;
+          if (bubbleEl) bubbleEl.classList.remove("is-speaking");
+          if (avatar) avatar.classList.remove("speaking-pulse");
+        }
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      audio.onerror = (e) => {
+        console.warn("MiniMax Audio playback error, falling back to Web Speech:", e);
+        if (state.activeAudioElement === audio) {
+          state.activeAudioElement = null;
+        }
+        URL.revokeObjectURL(audioUrl);
+        speakWebSpeech(cleanText, bubbleEl, forcePlay);
+      };
+
+      await audio.play();
+      return;
+    } catch (err) {
+      console.warn("MiniMax TTS Request failed, falling back to Web Speech:", err);
+      // 降級使用原生 Web Speech 播放
+    }
+  }
+
+  // 2. 原生 Web Speech 引擎回退
+  speakWebSpeech(cleanText, bubbleEl, forcePlay);
+}
+
+/**
+ * 系統原生 Web Speech 廣東話朗讀引擎
+ */
+function speakWebSpeech(cleanText, bubbleEl = null, forcePlay = false) {
+  if (typeof window === "undefined" || !window.speechSynthesis) return;
+
   const utterance = new SpeechSynthesisUtterance(cleanText);
   utterance.lang = "zh-HK";
 
-  // 阻止 GC 提前垃圾回收：將 utterance 放入強引用 Set 中，並限制最大容量為 5
   if (state.speechUtteranceRefs) {
     state.speechUtteranceRefs.add(utterance);
     if (state.speechUtteranceRefs.size > 5) {
@@ -3681,12 +3844,10 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
     }
   }
   
-  // 優先匹配同工自定義選擇的語音
   if (state.selectedVoiceName && state.selectedVoiceName !== "") {
     const matched = state.voices.find(v => v.name === state.selectedVoiceName);
     if (matched) utterance.voice = matched;
   } else {
-    // 強韌的廣東話 (Cantonese HK) 匹配與性別自適應演算法
     const hkVoices = state.voices.filter(v => 
       v.lang === "zh-HK" || 
       v.lang === "zh-Hant-HK" || 
@@ -3697,35 +3858,22 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
     );
     
     if (hkVoices.length > 0) {
-      const isFemaleCase = state.activeCase && state.activeCase.gender === "女";
+      const isFemaleCase = state.activeCase && (state.activeCase.gender === "女" || state.activeCase.gender === "Female");
       let selectedVoice = null;
       
       if (isFemaleCase) {
-        // 優先尋找女性聲音
         const femaleKeywords = ["sin-ji", "tracy", "hiumaan", "ting-ting", "yu-ting", "female", "szemin"];
-        selectedVoice = hkVoices.find(v => 
-          femaleKeywords.some(kw => v.name.toLowerCase().includes(kw))
-        );
+        selectedVoice = hkVoices.find(v => femaleKeywords.some(kw => v.name.toLowerCase().includes(kw)));
       } else {
-        // 優先尋找男性聲音
         const maleKeywords = ["danny", "wanlung", "limu", "male", "kangkang"];
-        selectedVoice = hkVoices.find(v => 
-          maleKeywords.some(kw => v.name.toLowerCase().includes(kw))
-        );
+        selectedVoice = hkVoices.find(v => maleKeywords.some(kw => v.name.toLowerCase().includes(kw)));
       }
       
-      // 如果沒有找到對應性別的聲音，則嘗試不帶性別匹配或者使用第一個廣東話語音
-      if (!selectedVoice) {
-        selectedVoice = hkVoices[0];
-      }
-      
+      if (!selectedVoice) selectedVoice = hkVoices[0];
       utterance.voice = selectedVoice;
-    } else {
-      console.warn("您的裝置目前未偵測到廣東話 (zh-HK) 播放語音包，將使用瀏覽器預設語音。");
     }
   }
 
-  // 1. 基於案主性格與抗拒程度，動態調製 TTS 語調與語速 (Emotional Speech Modulation)
   let rate = 1.05;
   let pitch = 1.0;
   
@@ -3735,31 +3883,23 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
     const isDepressed = emotion.includes("沮喪") || emotion.includes("低落") || emotion.includes("無力") || emotion.includes("悲觀");
     
     if (isAnxious) {
-      rate = 1.15; // 語速微快，模擬激動與焦慮不安
-      pitch = 1.06; // 語調微高
+      rate = 1.15;
+      pitch = 1.06;
     } else if (isDepressed) {
-      rate = 0.90; // 語速偏慢，模擬悲觀沮喪與心理阻礙
-      pitch = 0.92; // 語調偏低，營造低能量感
+      rate = 0.90;
+      pitch = 0.92;
     }
   }
   
   utterance.rate = rate;
   utterance.pitch = pitch;
-
-  // 立即標記當前活動語料，以確保在延時（嘆氣播放）期間能通過安全鎖檢查
   state.activeUtterance = utterance;
 
   utterance.onstart = () => {
-    if (state.activeUtterance !== utterance) {
-      return; // 被中途切換，終止高亮顯示
-    }
-    if (bubbleEl) {
-      bubbleEl.classList.add("is-speaking");
-    }
+    if (state.activeUtterance !== utterance) return;
+    if (bubbleEl) bubbleEl.classList.add("is-speaking");
     const avatar = document.getElementById("rp-active-avatar");
-    if (avatar) {
-      avatar.classList.add("speaking-pulse");
-    }
+    if (avatar) avatar.classList.add("speaking-pulse");
   };
 
   const cleanup = () => {
@@ -3767,25 +3907,22 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
       state.speechUtteranceRefs.delete(utterance);
     }
     if (state.activeUtterance === utterance) {
-      if (bubbleEl) {
-        bubbleEl.classList.remove("is-speaking");
-      }
+      if (bubbleEl) bubbleEl.classList.remove("is-speaking");
       const avatar = document.getElementById("rp-active-avatar");
-      if (avatar) {
-        avatar.classList.remove("speaking-pulse");
-      }
+      if (avatar) avatar.classList.remove("speaking-pulse");
       state.activeUtterance = null;
     }
   };
 
   utterance.onend = cleanup;
-  utterance.onerror = cleanup;
+  utterance.onerror = (e) => {
+    console.warn("Web Speech Utterance error:", e);
+    cleanup();
+  };
 
-  // 2. 語音前置聲學呼吸 (Breathing Acoustic Cue)
-  // 如果文本中包含 ellipses（…… 或 ...）代表案主正心生猶豫與阻抗，先觸發一個 350ms 的嘆氣音效
-  if (text.includes("…") || text.includes("...") || Math.random() < 0.3) {
+  // 語音前置聲學呼吸 (Breathing Acoustic Cue)
+  if (cleanText.includes("…") || cleanText.includes("...") || Math.random() < 0.3) {
     AudioSynth.playSigh();
-    // 延時 280ms 播放語音，讓嘆氣呼吸聲與說話聲自然銜接
     setTimeout(() => {
       if (state.activeUtterance === utterance) {
         if (typeof window !== "undefined" && window.speechSynthesis) {
@@ -3796,9 +3933,7 @@ function speakCantonese(text, bubbleEl = null, forcePlay = false) {
     return;
   }
 
-  if (typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.speak(utterance);
-  }
+  window.speechSynthesis.speak(utterance);
 }
 
 /* ==========================================================================
@@ -5467,8 +5602,58 @@ function renderSettings(container) {
           </select>
         </div>
 
+        <div class="form-group" style="background: rgba(var(--accent-rgb), 0.04); border: 1px solid rgba(var(--accent-rgb), 0.15); border-radius: 10px; padding: 14px; display:flex; flex-direction:column; gap:10px;">
+          <label style="font-weight: 700; color: var(--accent-cyan); display:flex; align-items:center; gap:6px;">
+            <i class="fa-solid fa-microphone-lines"></i> 廣東話語音朗讀引擎 (Cantonese TTS Engine)
+          </label>
+          <select id="set-tts-engine">
+            <option value="system" ${state.ttsEngine === 'system' ? 'selected' : ''}>系統原生語音 (免費 / 免 API 金鑰)</option>
+            <option value="minimax-global" ${state.ttsEngine === 'minimax-global' ? 'selected' : ''}>MiniMax 國際版 (api.minimax.chat - 擬真粵語推薦 ⭐)</option>
+            <option value="minimax-cn" ${state.ttsEngine === 'minimax-cn' ? 'selected' : ''}>MiniMax 國內版 (api.minimaxi.chat - 中國大陸節點)</option>
+          </select>
+
+          <div id="minimax-config-panel" style="${state.ttsEngine && state.ttsEngine.startsWith('minimax') ? 'display:flex;' : 'display:none;'} flex-direction:column; gap:10px; margin-top:4px;">
+            <div>
+              <label style="font-size:0.8rem; color:var(--text-muted);">MiniMax API 金鑰 (API Key)</label>
+              <input type="password" id="set-minimax-api-key" value="${state.minimaxApiKey || ''}" placeholder="輸入 MiniMax API Key (eyJ...)" style="margin-top:2px;" />
+            </div>
+
+            <div>
+              <label style="font-size:0.8rem; color:var(--text-muted);">MiniMax Group ID (用戶群組 ID)</label>
+              <input type="text" id="set-minimax-group-id" value="${state.minimaxGroupId || ''}" placeholder="例如：181234567890..." style="margin-top:2px;" />
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+              <div>
+                <label style="font-size:0.8rem; color:var(--text-muted);">👨 男案主粵語聲線 (Male Timbre)</label>
+                <select id="set-minimax-male-timbre" style="margin-top:2px;">
+                  <option value="cantonese_male" ${state.minimaxMaleTimbre === 'cantonese_male' ? 'selected' : ''}>標準廣東話男聲 (cantonese_male)</option>
+                  <option value="male-qn-qingse" ${state.minimaxMaleTimbre === 'male-qn-qingse' ? 'selected' : ''}>青年男聲 (male-qn-qingse)</option>
+                  <option value="presenter_male" ${state.minimaxMaleTimbre === 'presenter_male' ? 'selected' : ''}>成熟男聲 (presenter_male)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size:0.8rem; color:var(--text-muted);">👩 女案主粵語聲線 (Female Timbre)</label>
+                <select id="set-minimax-female-timbre" style="margin-top:2px;">
+                  <option value="cantonese_female" ${state.minimaxFemaleTimbre === 'cantonese_female' ? 'selected' : ''}>標準廣東話女聲 (cantonese_female)</option>
+                  <option value="female-yujie" ${state.minimaxFemaleTimbre === 'female-yujie' ? 'selected' : ''}>溫柔女聲 (female-yujie)</option>
+                  <option value="presenter_female" ${state.minimaxFemaleTimbre === 'presenter_female' ? 'selected' : ''}>清晰女聲 (presenter_female)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-top:4px;">
+              <button type="button" id="btn-test-minimax-tts" class="btn" style="background:rgba(6, 182, 212, 0.15); border:1px solid var(--accent-cyan); color:var(--accent-cyan); font-size:0.75rem; padding:6px 12px;">
+                <i class="fa-solid fa-volume-high"></i> 🔊 測試 MiniMax 廣東話發音
+              </button>
+              <span id="minimax-test-status" style="font-size:0.72rem; color:var(--text-muted);"></span>
+            </div>
+          </div>
+        </div>
+
         <div class="form-group">
-          <label>廣東話 TTS 語音朗讀聲音選擇 (Cantonese Voice)</label>
+          <label>系統原生 TTS 語音朗讀聲音 (Web Speech Voice Fallback)</label>
           <select id="set-voice">
             <option value="">預設系統廣東話聲音 (Auto HK Voice)</option>
             ${state.voices.filter(v => v.lang === "zh-HK" || v.lang === "zh-Hant-HK" || v.name.toLowerCase().includes("hong kong")).map(v => `
@@ -5476,7 +5661,7 @@ function renderSettings(container) {
             `).join("")}
           </select>
           <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
-            📢 語音播放完全使用設備原生提供的 TTS 合成。如果下拉列表中沒有出現更多廣東話聲音，可於設備操作系統的「輔助功能 / 語音朗讀」中下載額外的廣東話高品質包（如 macOS 的 Sin-Ji 語音）。
+            📢 系統原生語音使用瀏覽器內建 TTS。若選擇 MiniMax 引擎，當網絡離線或未配置時會自動平滑降級為本原生語音。
           </p>
         </div>
 
@@ -5519,6 +5704,64 @@ function renderSettings(container) {
     </div>
   `;
 
+  // Toggle MiniMax config panel on engine select change
+  const engineSelect = document.getElementById("set-tts-engine");
+  const minimaxPanel = document.getElementById("minimax-config-panel");
+  if (engineSelect && minimaxPanel) {
+    engineSelect.addEventListener("change", () => {
+      const isMiniMax = engineSelect.value.startsWith("minimax");
+      minimaxPanel.style.display = isMiniMax ? "flex" : "none";
+    });
+  }
+
+  // MiniMax Voice Test Button Listener
+  const testTtsBtn = document.getElementById("btn-test-minimax-tts");
+  const testStatus = document.getElementById("minimax-test-status");
+  if (testTtsBtn) {
+    testTtsBtn.addEventListener("click", async () => {
+      const engine = engineSelect ? engineSelect.value : state.ttsEngine;
+      const isCn = engine === "minimax-cn";
+      const key = (document.getElementById("set-minimax-api-key")?.value || "").trim();
+      const groupId = (document.getElementById("set-minimax-group-id")?.value || "").trim();
+      const maleVoice = document.getElementById("set-minimax-male-timbre")?.value || "cantonese_male";
+      
+      if (!key) {
+        alert("請先輸入 MiniMax API 金鑰再進行發音測試！");
+        return;
+      }
+
+      testTtsBtn.disabled = true;
+      testStatus.textContent = "⏳ 正在合成測試語音...";
+      testStatus.style.color = "var(--accent-cyan)";
+
+      try {
+        const testText = "同工你好！我係 MiniMax 廣東話語音引擎，祝你輔導順利！";
+        const audioUrl = await fetchMiniMaxTTSAudio(testText, maleVoice, key, groupId, isCn);
+        const audio = new Audio(audioUrl);
+        
+        audio.onended = () => {
+          testTtsBtn.disabled = false;
+          testStatus.textContent = "✅ 語音播放完畢，連線正常！";
+          testStatus.style.color = "var(--accent-green)";
+          URL.revokeObjectURL(audioUrl);
+        };
+        
+        audio.onerror = (e) => {
+          testTtsBtn.disabled = false;
+          testStatus.textContent = "❌ 音訊解碼失敗";
+          testStatus.style.color = "var(--accent-rose)";
+          URL.revokeObjectURL(audioUrl);
+        };
+
+        await audio.play();
+      } catch (err) {
+        testTtsBtn.disabled = false;
+        testStatus.textContent = `❌ 連線失敗: ${err.message}`;
+        testStatus.style.color = "var(--accent-rose)";
+      }
+    });
+  }
+
   // Attach Settings Submit
   const form = document.getElementById("settings-form");
   form.addEventListener("submit", (e) => {
@@ -5527,21 +5770,36 @@ function renderSettings(container) {
     const userName = document.getElementById("set-user-name").value.trim();
     const key = document.getElementById("set-api-key").value.trim();
     const model = document.getElementById("set-model").value;
+    const ttsEngine = document.getElementById("set-tts-engine").value;
+    const minimaxKey = document.getElementById("set-minimax-api-key")?.value.trim() || "";
+    const minimaxGroup = document.getElementById("set-minimax-group-id")?.value.trim() || "";
+    const maleTimbre = document.getElementById("set-minimax-male-timbre")?.value || "cantonese_male";
+    const femaleTimbre = document.getElementById("set-minimax-female-timbre")?.value || "cantonese_female";
     const voice = document.getElementById("set-voice").value;
     const recLang = document.getElementById("set-rec-lang").value;
- 
+
     state.userName = userName;
     state.apiKey = key;
     state.selectedModel = model;
+    state.ttsEngine = ttsEngine;
+    state.minimaxApiKey = minimaxKey;
+    state.minimaxGroupId = minimaxGroup;
+    state.minimaxMaleTimbre = maleTimbre;
+    state.minimaxFemaleTimbre = femaleTimbre;
     state.selectedVoiceName = voice;
     state.recognitionLang = recLang;
- 
+
     localStorage.setItem("rehab_user_name", userName);
     localStorage.setItem("rehab_gemini_api_key", key);
     localStorage.setItem("rehab_selected_model", model);
+    localStorage.setItem("rehab_tts_engine", ttsEngine);
+    localStorage.setItem("rehab_minimax_api_key", minimaxKey);
+    localStorage.setItem("rehab_minimax_group_id", minimaxGroup);
+    localStorage.setItem("rehab_minimax_male_timbre", maleTimbre);
+    localStorage.setItem("rehab_minimax_female_timbre", femaleTimbre);
     localStorage.setItem("rehab_selected_voice", voice);
     localStorage.setItem("rehab_recognition_lang", recLang);
- 
+
     updateStaticUIStrings();
     updateApiBadge();
     alert("設定儲存成功！");
@@ -5575,6 +5833,11 @@ function renderSettings(container) {
       localStorage.removeItem("rehab_speech_muted");
       localStorage.removeItem("rehab_theory_progress");
       localStorage.removeItem("rehab_user_name");
+      localStorage.removeItem("rehab_tts_engine");
+      localStorage.removeItem("rehab_minimax_api_key");
+      localStorage.removeItem("rehab_minimax_group_id");
+      localStorage.removeItem("rehab_minimax_male_timbre");
+      localStorage.removeItem("rehab_minimax_female_timbre");
 
       // 3. Reset state properties to defaults
       state.cases = [...MOCK_CASES];
@@ -5588,6 +5851,11 @@ function renderSettings(container) {
       state.isSpeechMuted = false;
       state.selectedVoiceName = "";
       state.userName = "";
+      state.ttsEngine = "system";
+      state.minimaxApiKey = "";
+      state.minimaxGroupId = "";
+      state.minimaxMaleTimbre = "cantonese_male";
+      state.minimaxFemaleTimbre = "cantonese_female";
       state.theoryProgress = {
         act: { info: false, flashcards: false, test: false },
         mi: { info: false, flashcards: false, test: false },
@@ -5767,14 +6035,17 @@ function initVoiceRecognition(inputEl) {
   recognition.maxAlternatives = 1;
 
   state.recognition = recognition;
+  let finalAccumulated = "";
 
   micBtn.addEventListener("click", () => {
     if (state.isRecording) {
+      state.isRecording = false;
       recognition.stop();
     } else {
       try {
-        // 強制在每次啟動前重新指定語系標記，解決執行期屬性被重置為系統預設值（普通話）的瀏覽器 bug。
+        finalAccumulated = inputEl.value ? inputEl.value.trim() + " " : "";
         recognition.lang = state.recognitionLang;
+        state.isRecording = true;
         recognition.start();
       } catch (err) {
         console.error(err);
@@ -5792,6 +6063,16 @@ function initVoiceRecognition(inputEl) {
   };
 
   recognition.onend = () => {
+    // 若用戶未主動結束錄音（如僅思考停頓），自動無縫重新啟動錄音
+    if (state.isRecording) {
+      try {
+        recognition.lang = state.recognitionLang;
+        recognition.start();
+        return;
+      } catch (e) {
+        // Ignored if already started
+      }
+    }
     state.isRecording = false;
     micBtn.classList.remove("recording");
     waveHud.classList.remove("active");
@@ -5801,6 +6082,10 @@ function initVoiceRecognition(inputEl) {
   };
 
   recognition.onerror = (e) => {
+    if (e.error === 'no-speech') {
+      // 靜音超時不視為致命錯誤，若在錄音狀態則由 onend 自動重啟
+      return;
+    }
     console.error("Speech Recognition Error:", e);
     statusText.textContent = `語音出錯：${e.error === 'not-allowed' ? '未授權麥克風' : e.error}`;
     statusText.style.color = "var(--accent-rose)";
@@ -5811,24 +6096,25 @@ function initVoiceRecognition(inputEl) {
   };
 
   recognition.onresult = (event) => {
-    let localFinal = "";
-    let interimTranscript = "";
-    for (let i = 0; i < event.results.length; ++i) {
+    let currentInterim = "";
+    let currentFinal = "";
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
       const result = event.results[i];
       if (result.isFinal) {
-        localFinal += result[0].transcript;
+        currentFinal += result[0].transcript;
       } else {
-        interimTranscript += result[0].transcript;
+        currentInterim += result[0].transcript;
       }
     }
-    inputEl.value = localFinal + interimTranscript;
+    if (currentFinal) {
+      finalAccumulated += currentFinal;
+    }
+    inputEl.value = (finalAccumulated + currentInterim).trim();
 
-    // 顯示識別狀態
-    statusText.textContent = `🎙️ 正在錄音中... 再次點擊麥克風以停止`;
+    statusText.textContent = `🎙️ 正在連續錄音中... (已捕捉語句)`;
     statusText.style.color = "var(--accent-green)";
 
-    // 簡單啟發式檢測：如果結果中出現大量簡體字或普通話特徵詞，提示可能誤判
-    const speechToText = localFinal + interimTranscript;
+    const speechToText = finalAccumulated + currentInterim;
     const simplifiedChars = /[这个么们来对说让还为没什从]/;
     if (simplifiedChars.test(speechToText) && state.recognitionLang !== 'zh-CN') {
       statusText.textContent = `⚠️ 辨識結果疑似為普通話，建議在設定中切換至 yue-Hant-HK 或使用無痕視窗`;
