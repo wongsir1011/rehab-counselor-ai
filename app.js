@@ -3723,6 +3723,11 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
     throw new Error("未提供 MiniMax API Key");
   }
 
+  // 1. 特殊金鑰類型即時檢測：Coding Plan 代碼專用金鑰 (sk-cp-)
+  if (cleanKey.startsWith("sk-cp-") || cleanKey.startsWith("sk-coding-")) {
+    throw new Error(`檢測到你輸入的是 MiniMax Coding Plan 金鑰 (以 sk-cp- 開頭)。\n\n📌 官方權限限制說明：MiniMax 官方的 Coding Plan 訂閱僅開放「大語言模型代碼生成」權限，並不包含「語音合成 (TTS)」功能。若發送語音請求，MiniMax 伺服器會強制返回 2049 (Invalid API Key)。\n\n💡 解決方案：\n1. 請在 MiniMax 開放平台 (platform.minimax.io 或 platform.minimaxi.com) 領取標準開放平台 API Key；或\n2. 於設定中切換為【系統原生語音 (免費 / 免金鑰)】，即可立即開始無障礙廣東話實戰練習！`);
+  }
+
   // 整理候選 Group ID 優先級
   const candidateGids = [];
   if (userGid) candidateGids.push(userGid);
@@ -3742,77 +3747,86 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
         "https://api.minimaxi.chat/v1/t2a_v2"
       ];
 
+  // 候選語音模型
+  const candidateModels = ["speech-01-turbo", "speech-02-turbo", "speech-2.8-turbo"];
+
   let lastError = null;
 
   for (const baseUrl of candidateBases) {
     for (const gid of candidateGids) {
-      try {
-        const url = gid ? `${baseUrl}?GroupId=${encodeURIComponent(gid)}` : baseUrl;
-        
-        const payload = {
-          model: "speech-01-turbo",
-          text: text,
-          stream: false,
-          voice_setting: {
-            voice_id: voiceId || "cantonese_male",
-            speed: 1.0,
-            vol: 1.0,
-            pitch: 0
-          },
-          audio_setting: {
-            sample_rate: 32000,
-            bitrate: 128000,
-            format: "mp3",
-            channel: 1
+      for (const modelName of candidateModels) {
+        try {
+          const url = gid ? `${baseUrl}?GroupId=${encodeURIComponent(gid)}` : baseUrl;
+          
+          const payload = {
+            model: modelName,
+            text: text,
+            stream: false,
+            voice_setting: {
+              voice_id: voiceId || "cantonese_male",
+              speed: 1.0,
+              vol: 1.0,
+              pitch: 0
+            },
+            audio_setting: {
+              sample_rate: 32000,
+              bitrate: 128000,
+              format: "mp3",
+              channel: 1
+            }
+          };
+
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${cleanKey}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(payload)
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`MiniMax HTTP ${response.status}: ${errText}`);
           }
-        };
 
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${cleanKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(payload)
-        });
+          const result = await response.json();
+          if (result.base_resp && result.base_resp.status_code !== 0) {
+            const err = new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
+            err.code = result.base_resp.status_code;
+            throw err;
+          }
 
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`MiniMax HTTP ${response.status}: ${errText}`);
+          if (!result.data || !result.data.audio) {
+            throw new Error("MiniMax API 未返回音訊數據");
+          }
+
+          const audioBytes = hexToUint8Array(result.data.audio);
+          if (!audioBytes) {
+            throw new Error("MiniMax 音訊數據解碼失敗");
+          }
+
+          const blob = new Blob([audioBytes], { type: "audio/mp3" });
+          return URL.createObjectURL(blob);
+        } catch (err) {
+          lastError = err;
+          // 若錯誤是明確的帳號餘額不足 (2056) 或欠費，直接拋出
+          if (err.code && err.code === 2056) {
+            throw new Error("MiniMax (2056 額度不足)：您的 MiniMax 帳戶餘額已用盡，請至 MiniMax 控制台充值或領取贈送額度。");
+          }
+          // 若是其他業務錯誤（非 2049 認證失敗），且非 1004，拋出
+          if (err.code && err.code !== 2049 && err.code !== 1004 && err.code !== 2013) {
+            throw err;
+          }
+          // 若是 2049，繼續嘗試下一個組合
         }
-
-        const result = await response.json();
-        if (result.base_resp && result.base_resp.status_code !== 0) {
-          const err = new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
-          err.code = result.base_resp.status_code;
-          throw err;
-        }
-
-        if (!result.data || !result.data.audio) {
-          throw new Error("MiniMax API 未返回音訊數據");
-        }
-
-        const audioBytes = hexToUint8Array(result.data.audio);
-        if (!audioBytes) {
-          throw new Error("MiniMax 音訊數據解碼失敗");
-        }
-
-        const blob = new Blob([audioBytes], { type: "audio/mp3" });
-        return URL.createObjectURL(blob);
-      } catch (err) {
-        lastError = err;
-        // 若錯誤非 2049（如帳號餘額不足、格式錯誤），直接拋出真實錯誤
-        if (err.code && err.code !== 2049 && err.code !== 1004) {
-          throw err;
-        }
-        // 若是 2049，繼續嘗試下一個 GroupId/端點組合
       }
     }
   }
 
-  // 若全部候選組合皆返回 2049
-  const hintGid = autoGid ? `（系統已嘗試自動提取 Group ID: ${autoGid}）` : `（建議在後台 API Keys 頁面確認你的 Group ID）`;
-  throw new Error(`MiniMax (2049 無效金鑰)：伺服器拒絕了該 API Key。${hintGid}。請檢查：\n1. API Key 是否已被刪除或重新生成。\n2. 帳號是否有足夠點數/餘額。`);
+  // 若所有組合皆返回 2049
+  const keyTypeHint = cleanKey.startsWith("sk-") ? `（金鑰格式為 sk- 標準格式）` : `（金鑰為 JWT 格式）`;
+  throw new Error(`MiniMax 認證失敗 (Error 2049: invalid api key) ${keyTypeHint}。\n\n📌 請依序檢查以下 3 點：\n1. 取得金鑰的平台：請確認是在【MiniMax 開放平台】(platform.minimax.io 或 platform.minimaxi.com) 取得，而非海螺 AI (Hailuo) 等消費端產品。\n2. 帳戶額度：請登入開放平台確認帳戶是否已啟動並領取免費試用額度。\n3. 無痛替代方案：你亦可隨時在設定中切換回【系統原生廣東話 (免費/免金鑰)】，完全不影響任何臨床實戰演練！`);
 }
 
 /**
