@@ -1441,6 +1441,8 @@ body {
 .dossier-avatar-container {
   width: 58px;
   height: 58px;
+  max-width: 58px;
+  max-height: 58px;
   border-radius: 14px;
   background: rgba(var(--accent-rgb), 0.08);
   border: 1px solid rgba(var(--accent-rgb), 0.2);
@@ -1450,6 +1452,9 @@ body {
   font-size: 2.2rem;
   box-shadow: inset 0 0 10px rgba(var(--accent-rgb), 0.15);
   position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .dossier-card:hover .dossier-avatar-container {
