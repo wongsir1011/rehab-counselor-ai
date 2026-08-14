@@ -3712,20 +3712,58 @@ function extractGroupIdFromJwt(token) {
 }
 
 /**
- * MiniMax 廣東話神經語音合成 API (REST API v2)
+ * 診斷日誌記錄器：向 UI 與內存追加 MiniMax API 追蹤日誌
+ */
+function appendMiniMaxLog(line) {
+  const timeStr = new Date().toLocaleTimeString();
+  const formatted = `[${timeStr}] ${line}`;
+  if (!state.minimaxLogs) state.minimaxLogs = [];
+  state.minimaxLogs.push(formatted);
+  
+  try {
+    localStorage.setItem("rehab_minimax_debug_log", state.minimaxLogs.slice(-50).join("\n"));
+  } catch (e) {}
+
+  const logBox = document.getElementById("minimax-debug-log");
+  if (logBox) {
+    logBox.textContent = state.minimaxLogs.join("\n");
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+}
+
+/**
+ * MiniMax 廣東話神經語音合成 API (REST API v2) 帶全程診斷記錄
  */
 async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false) {
   const cleanKey = (apiKey || "").replace(/^Bearer\s+/i, "").trim();
   let userGid = (groupId || "").trim();
   const autoGid = extractGroupIdFromJwt(cleanKey);
 
+  appendMiniMaxLog("══════════════════════════════════════════");
+  appendMiniMaxLog("🚀 開始 MiniMax 廣東話語音連線診斷流程...");
+
   if (!cleanKey) {
+    appendMiniMaxLog("❌ 錯誤：未輸入任何 API Key！");
     throw new Error("未提供 MiniMax API Key");
   }
 
+  // 遮蔽金鑰輸出以保護同工隱私 (如 sk-ab****1234)
+  const maskedKey = cleanKey.length > 10 
+    ? `${cleanKey.slice(0, 5)}****${cleanKey.slice(-4)} (長度: ${cleanKey.length})` 
+    : `**** (長度: ${cleanKey.length})`;
+  appendMiniMaxLog(`🔑 金鑰特徵：${maskedKey}`);
+
   // 1. 特殊金鑰類型即時檢測：Coding Plan 代碼專用金鑰 (sk-cp-)
   if (cleanKey.startsWith("sk-cp-") || cleanKey.startsWith("sk-coding-")) {
+    appendMiniMaxLog("⚠️ 發現金鑰以 sk-cp- 開頭（MiniMax Coding Plan 訂閱專用金鑰）！");
+    appendMiniMaxLog("🛑 失敗原因：MiniMax 官方規定 Coding Plan 金鑰僅開放文字補全接口，未開通語音合成 (T2A) 權限，伺服器將拒絕請求 (2049)。");
     throw new Error(`檢測到你輸入的是 MiniMax Coding Plan 金鑰 (以 sk-cp- 開頭)。\n\n📌 官方權限限制說明：MiniMax 官方的 Coding Plan 訂閱僅開放「大語言模型代碼生成」權限，並不包含「語音合成 (TTS)」功能。若發送語音請求，MiniMax 伺服器會強制返回 2049 (Invalid API Key)。\n\n💡 解決方案：\n1. 請在 MiniMax 開放平台 (platform.minimax.io 或 platform.minimaxi.com) 領取標準開放平台 API Key；或\n2. 於設定中切換為【系統原生語音 (免費 / 免金鑰)】，即可立即開始無障礙廣東話實戰練習！`);
+  }
+
+  if (autoGid) {
+    appendMiniMaxLog(`🔍 從 JWT 金鑰 Payload 中自動解析出 Group ID: ${autoGid}`);
+  } else if (cleanKey.startsWith("sk-")) {
+    appendMiniMaxLog(`ℹ️ 金鑰為 sk- 標準格式 (非 JWT)`);
   }
 
   // 整理候選 Group ID 優先級
@@ -3747,17 +3785,19 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
         "https://api.minimaxi.chat/v1/t2a_v2"
       ];
 
-  // 候選語音模型
   const candidateModels = ["speech-01-turbo", "speech-02-turbo", "speech-2.8-turbo"];
-
   let lastError = null;
+  let attemptCount = 0;
 
   for (const baseUrl of candidateBases) {
     for (const gid of candidateGids) {
       for (const modelName of candidateModels) {
+        attemptCount++;
+        const targetUrl = gid ? `${baseUrl}?GroupId=${encodeURIComponent(gid)}` : baseUrl;
+        appendMiniMaxLog(`\n[嘗試 #${attemptCount}] 發送請求至: ${targetUrl}`);
+        appendMiniMaxLog(`參數: model=${modelName}, voice_id=${voiceId || 'cantonese_male'}, text="${text.slice(0, 15)}..."`);
+
         try {
-          const url = gid ? `${baseUrl}?GroupId=${encodeURIComponent(gid)}` : baseUrl;
-          
           const payload = {
             model: modelName,
             text: text,
@@ -3776,7 +3816,7 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
             }
           };
 
-          const response = await fetch(url, {
+          const response = await fetch(targetUrl, {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${cleanKey}`,
@@ -3785,48 +3825,56 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
             body: JSON.stringify(payload)
           });
 
+          appendMiniMaxLog(`HTTP 回應狀態: ${response.status} ${response.statusText}`);
+
+          const rawText = await response.text();
+          let result = null;
+          try {
+            result = JSON.parse(rawText);
+          } catch (e) {
+            appendMiniMaxLog(`⚠️ 非 JSON 回應內容: ${rawText.slice(0, 200)}`);
+          }
+
+          if (result) {
+            if (result.base_resp) {
+              appendMiniMaxLog(`伺服器返回 base_resp: status_code=${result.base_resp.status_code}, status_msg="${result.base_resp.status_msg || ''}"`);
+            }
+            if (result.base_resp && result.base_resp.status_code !== 0) {
+              const err = new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
+              err.code = result.base_resp.status_code;
+              throw err;
+            }
+            if (result.data && result.data.audio) {
+              appendMiniMaxLog(`🎉 成功獲取音訊二進制數據 (Hex 長度: ${result.data.audio.length})！`);
+              const audioBytes = hexToUint8Array(result.data.audio);
+              if (!audioBytes) throw new Error("音訊解碼失敗");
+              appendMiniMaxLog("✅ 成功解碼 MP3 音訊流，準備播放！");
+              const blob = new Blob([audioBytes], { type: "audio/mp3" });
+              return URL.createObjectURL(blob);
+            }
+          }
+
           if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`MiniMax HTTP ${response.status}: ${errText}`);
+            throw new Error(`HTTP ${response.status}: ${rawText}`);
           }
-
-          const result = await response.json();
-          if (result.base_resp && result.base_resp.status_code !== 0) {
-            const err = new Error(`MiniMax API Error (${result.base_resp.status_code}): ${result.base_resp.status_msg}`);
-            err.code = result.base_resp.status_code;
-            throw err;
-          }
-
-          if (!result.data || !result.data.audio) {
-            throw new Error("MiniMax API 未返回音訊數據");
-          }
-
-          const audioBytes = hexToUint8Array(result.data.audio);
-          if (!audioBytes) {
-            throw new Error("MiniMax 音訊數據解碼失敗");
-          }
-
-          const blob = new Blob([audioBytes], { type: "audio/mp3" });
-          return URL.createObjectURL(blob);
         } catch (err) {
           lastError = err;
-          // 若錯誤是明確的帳號餘額不足 (2056) 或欠費，直接拋出
-          if (err.code && err.code === 2056) {
-            throw new Error("MiniMax (2056 額度不足)：您的 MiniMax 帳戶餘額已用盡，請至 MiniMax 控制台充值或領取贈送額度。");
+          appendMiniMaxLog(`❌ 該輪嘗試失敗: ${err.message}`);
+          if (err.code === 2056) {
+            throw new Error("MiniMax (2056 額度不足)：您的帳戶餘額已耗盡，請至控制台充值。");
           }
-          // 若是其他業務錯誤（非 2049 認證失敗），且非 1004，拋出
           if (err.code && err.code !== 2049 && err.code !== 1004 && err.code !== 2013) {
             throw err;
           }
-          // 若是 2049，繼續嘗試下一個組合
         }
       }
     }
   }
 
-  // 若所有組合皆返回 2049
+  appendMiniMaxLog("══════════════════════════════════════════");
+  appendMiniMaxLog("❌ 所有候選端點與 Group ID 組合皆返回 2049。");
   const keyTypeHint = cleanKey.startsWith("sk-") ? `（金鑰格式為 sk- 標準格式）` : `（金鑰為 JWT 格式）`;
-  throw new Error(`MiniMax 認證失敗 (Error 2049: invalid api key) ${keyTypeHint}。\n\n📌 請依序檢查以下 3 點：\n1. 取得金鑰的平台：請確認是在【MiniMax 開放平台】(platform.minimax.io 或 platform.minimaxi.com) 取得，而非海螺 AI (Hailuo) 等消費端產品。\n2. 帳戶額度：請登入開放平台確認帳戶是否已啟動並領取免費試用額度。\n3. 無痛替代方案：你亦可隨時在設定中切換回【系統原生廣東話 (免費/免金鑰)】，完全不影響任何臨床實戰演練！`);
+  throw new Error(`MiniMax 認證失敗 (Error 2049: invalid api key) ${keyTypeHint}。\n\n請複製下方「🔍 診斷日誌」直接發送給我們，我們將根據伺服器的真實響應為您精確找出原因！`);
 }
 
 /**
@@ -5730,6 +5778,24 @@ function renderSettings(container) {
               </button>
               <span id="minimax-test-status" style="font-size:0.72rem; color:var(--text-muted);"></span>
             </div>
+
+            <!-- MiniMax API 執行診斷日誌視窗 -->
+            <div id="minimax-debug-container" style="display:flex; flex-direction:column; gap:6px; margin-top:10px; border-top:1px dashed var(--card-border); padding-top:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.75rem; font-weight:700; color:var(--accent-cyan);">
+                  <i class="fa-solid fa-terminal"></i> 🔍 MiniMax API 執行診斷日誌 (Diagnostic Log)
+                </span>
+                <div style="display:flex; gap:6px;">
+                  <button type="button" id="btn-copy-minimax-log" class="btn" style="padding:3px 8px; font-size:0.7rem; background:rgba(255,255,255,0.06); border:1px solid var(--card-border); color:var(--text-bright); border-radius:4px; cursor:pointer;">
+                    📋 複製完整日誌
+                  </button>
+                  <button type="button" id="btn-clear-minimax-log" class="btn" style="padding:3px 8px; font-size:0.7rem; background:rgba(255,255,255,0.06); border:1px solid var(--card-border); color:var(--text-muted); border-radius:4px; cursor:pointer;">
+                    🧹 清空
+                  </button>
+                </div>
+              </div>
+              <pre id="minimax-debug-log" style="background:#090d16; border:1px solid rgba(6,182,212,0.25); color:#38bdf8; padding:10px; border-radius:6px; font-size:0.72rem; max-height:180px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; font-family:monospace; line-height:1.4;">${(state.minimaxLogs && state.minimaxLogs.length > 0) ? state.minimaxLogs.join("\n") : (localStorage.getItem("rehab_minimax_debug_log") || "點擊上方「測試發音」按鈕後，此處將實時輸出連線握手、HTTP 狀態碼與 MiniMax 原始返回內容...")}</pre>
+            </div>
           </div>
         </div>
 
@@ -5853,6 +5919,34 @@ function renderSettings(container) {
         testStatus.textContent = `❌ 連線失敗: ${err.message}`;
         testStatus.style.color = "var(--accent-rose)";
       }
+    });
+  }
+
+  // Copy MiniMax Diagnostic Log
+  const copyLogBtn = document.getElementById("btn-copy-minimax-log");
+  if (copyLogBtn) {
+    copyLogBtn.addEventListener("click", async () => {
+      const logBox = document.getElementById("minimax-debug-log");
+      const textToCopy = logBox ? logBox.textContent : (state.minimaxLogs || []).join("\n");
+      try {
+        await navigator.clipboard.writeText(textToCopy);
+        const origText = copyLogBtn.innerHTML;
+        copyLogBtn.innerHTML = "✅ 已複製！";
+        setTimeout(() => copyLogBtn.innerHTML = origText, 2000);
+      } catch (err) {
+        alert("複製失敗，請手動全選下方日誌文字進行複製。");
+      }
+    });
+  }
+
+  // Clear MiniMax Diagnostic Log
+  const clearLogBtn = document.getElementById("btn-clear-minimax-log");
+  if (clearLogBtn) {
+    clearLogBtn.addEventListener("click", () => {
+      state.minimaxLogs = [];
+      localStorage.removeItem("rehab_minimax_debug_log");
+      const logBox = document.getElementById("minimax-debug-log");
+      if (logBox) logBox.textContent = "日誌已清空。點擊上方「測試發音」即可生成全新診斷日誌。";
     });
   }
 
