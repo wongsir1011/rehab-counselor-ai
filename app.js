@@ -2,6 +2,7 @@
 
 import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260724_v13_1";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260724_v13_1";
+import { RehabCounselorDB } from "./src/utils/db.js?v=20260827_v18_adr0005";
 
 // Global App State
 const state = {
@@ -10,18 +11,14 @@ const state = {
   apiKey: localStorage.getItem("rehab_gemini_api_key") || "",
   selectedModel: localStorage.getItem("rehab_selected_model") || "gemini-2.5-flash",
   userName: localStorage.getItem("rehab_user_name") || "",
-  cases: (() => {
-    const localCustom = localStorage.getItem("rehab_custom_cases");
-    if (localCustom) {
-      try {
-        const parsed = JSON.parse(localCustom);
-        return [...parsed, ...MOCK_CASES];
-      } catch (e) {
-        return [...MOCK_CASES];
-      }
-    }
-    return [...MOCK_CASES];
-  })(),
+  // ADR-0005：自定義個案改由 IndexedDB 保險箱提供，於 hydrateVault() 於開機時非同步注入。
+  // 此處僅同步載入內建個案，讓 module 頂層初始化維持同步。
+  cases: [...MOCK_CASES],
+  // 面談歷史的記憶體權威副本。IndexedDB 是持久層，此陣列供所有同步渲染函式讀取，
+  // 讓 6000+ 行既有渲染碼不必改成 async。
+  historySessions: [],
+  vaultMode: "indexeddb", // "indexeddb" | "localstorage-fallback"
+  vaultReady: false,
   activeCase: null,
   activeSession: null, // { history: [], notes: { soap: "", icf: "" }, report: null }
   miGameScore: 0,
@@ -325,11 +322,233 @@ function initLocaleAndSound() {
 }
 
 // Application Entry Point
+/* ==========================================================================
+   ADR-0005: 本地保險箱 (IndexedDB Vault)
+   ==========================================================================
+   分層策略：
+     - 會持續長大的資料（面談歷史、自定義個案）→ IndexedDB，不受 5MB 配額限制。
+     - 小型設定/進度（金鑰、語音設定、成就、理論進度）→ 留在 localStorage，
+       合計僅數 KB，搬遷只會令每個讀取點被迫 await，毫無收益。
+   同步性策略：
+     開機時一次性把保險箱讀入 state.historySessions / state.cases，
+     之後所有渲染函式維持同步讀取記憶體，寫入時才 await 落盤。
+   ========================================================================== */
+
+// 內建個案 id。自定義個案 = state.cases 扣除這些。
+// 註：舊版此處硬編碼為 ["case_01".."case_04"]，遺漏了後來新增的三個內建個案，
+// 導致它們被誤當自定義個案存入保險箱，開機後與 MOCK_CASES 重複出現兩次。
+const BUILTIN_CASE_IDS = new Set(MOCK_CASES.map(c => c.id));
+
+function getCustomCases() {
+  return state.cases.filter(c => c && !BUILTIN_CASE_IDS.has(c.id));
+}
+
+/** 把目前的自定義個案寫入保險箱。降級模式下退回 localStorage。 */
+async function persistCustomCases() {
+  const customCases = getCustomCases();
+  if (state.vaultMode === "localstorage-fallback") {
+    try {
+      localStorage.setItem("rehab_custom_cases", JSON.stringify(customCases));
+    } catch (e) {
+      console.error("[Vault] localStorage 降級寫入自定義個案失敗：", e);
+    }
+    return;
+  }
+  try {
+    for (const c of customCases) {
+      if (c && c.id) await RehabCounselorDB.saveCustomCase(c);
+    }
+  } catch (e) {
+    console.error("[Vault] 自定義個案寫入 IndexedDB 失敗：", e);
+  }
+}
+
+/** 把一場完成的面談寫入保險箱，並同步更新記憶體副本。 */
+async function persistCompletedSession(session) {
+  state.historySessions.unshift(session);
+  if (state.vaultMode === "localstorage-fallback") {
+    try {
+      localStorage.setItem("rehab_sessions_history", JSON.stringify(state.historySessions));
+    } catch (e) {
+      console.error("[Vault] localStorage 降級寫入面談紀錄失敗（可能已超出配額）：", e);
+      alert("⚠️ 本地儲存空間已滿，本場面談紀錄未能永久保存。請到「設定 → 資料保險箱」匯出備份後再重設。");
+    }
+    return;
+  }
+  const ok = await RehabCounselorDB.saveSession(session);
+  if (!ok) {
+    console.error("[Vault] 面談紀錄寫入 IndexedDB 失敗：", session.id);
+    alert("⚠️ 本場面談紀錄未能寫入本地保險箱，請到「設定 → 資料保險箱」檢查儲存狀態。");
+  }
+}
+
+/** localStorage 唯讀降級：IndexedDB 完全不可用時（如 Safari 無痕模式）沿用舊資料。 */
+function hydrateFromLocalStorageFallback() {
+  state.vaultMode = "localstorage-fallback";
+  try {
+    const s = JSON.parse(localStorage.getItem("rehab_sessions_history") || "[]");
+    state.historySessions = Array.isArray(s) ? s : [];
+  } catch (e) {
+    state.historySessions = [];
+  }
+  try {
+    const c = JSON.parse(localStorage.getItem("rehab_custom_cases") || "[]");
+    if (Array.isArray(c) && c.length > 0) {
+      state.cases = [...c.filter(x => x && !BUILTIN_CASE_IDS.has(x.id)), ...MOCK_CASES];
+    }
+  } catch (e) {
+    /* 保持 state.cases 為內建個案 */
+  }
+}
+
+/**
+ * 開機時把保險箱內容讀入記憶體。必須在首次 switchView() 之前 await 完成。
+ * IndexedDB 不可用時大聲降級並在 UI 明示，絕不靜默顯示空白歷史令同工誤以為資料遺失。
+ */
+async function hydrateVault() {
+  const available = await RehabCounselorDB.probe();
+  if (!available) {
+    console.warn("[Vault] IndexedDB 不可用（可能為無痕模式），降級至 localStorage 唯讀模式。");
+    hydrateFromLocalStorageFallback();
+    state.vaultReady = true;
+    return;
+  }
+
+  try {
+    const result = await RehabCounselorDB.migrateFromLocalStorage();
+    if (result && result.migrated) {
+      console.info(`[Vault] 已遷移 ${result.sessions} 場面談、${result.customCases} 個自定義個案至 IndexedDB，並釋放 localStorage 配額。`);
+    }
+  } catch (e) {
+    // 遷移失敗時 localStorage 原始資料仍完整保留（db.js 先驗證後刪除），
+    // 因此直接降級唯讀，資料不會遺失。
+    console.error("[Vault] localStorage → IndexedDB 遷移失敗，降級至 localStorage 唯讀模式：", e);
+    hydrateFromLocalStorageFallback();
+    state.vaultReady = true;
+    return;
+  }
+
+  try {
+    const [sessions, customCases] = await Promise.all([
+      RehabCounselorDB.getAllSessions(),
+      RehabCounselorDB.getAllCustomCases()
+    ]);
+    state.historySessions = sessions;
+    state.cases = [...customCases.filter(c => c && !BUILTIN_CASE_IDS.has(c.id)), ...MOCK_CASES];
+    state.vaultMode = "indexeddb";
+  } catch (e) {
+    console.error("[Vault] 讀取 IndexedDB 失敗，降級至 localStorage 唯讀模式：", e);
+    hydrateFromLocalStorageFallback();
+  }
+  state.vaultReady = true;
+}
+
+/**
+ * 還原備份後，把已寫回 localStorage 的小型進度/設定重新讀入 state。
+ * state 各欄位是在 module 載入時一次性初始化的，不重讀就會停留在還原前的舊值。
+ */
+function refreshStateFromLocalStorage() {
+  const readJSON = (key, fallback) => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+  };
+
+  state.userName = localStorage.getItem("rehab_user_name") || "";
+  state.completedCasesCount = parseInt(localStorage.getItem("rehab_completed_cases_count"), 10) || 0;
+  state.completedCaseIds = readJSON("rehab_completed_case_ids", []);
+  state.unlockedAchievements = readJSON("rehab_unlocked_achievements", []);
+  state.theoryProgress = readJSON("rehab_theory_progress", {
+    act: { info: false, flashcards: false, test: false },
+    mi: { info: false, flashcards: false, test: false },
+    icf: { info: false, flashcards: false, test: false }
+  });
+
+  state.locale = localStorage.getItem("rehab_locale") || "zh-HK";
+  state.selectedModel = localStorage.getItem("rehab_selected_model") || "gemini-2.5-flash";
+  state.ttsEngine = localStorage.getItem("rehab_tts_engine") || "system";
+  state.selectedVoiceName = localStorage.getItem("rehab_selected_voice") || "";
+  state.recognitionLang = localStorage.getItem("rehab_recognition_lang") || state.recognitionLang;
+  state.isSpeechMuted = localStorage.getItem("rehab_speech_muted") === "true";
+  state.soundEnabled = localStorage.getItem("rehab_sound_enabled") !== "false";
+  state.minimaxMaleTimbre = localStorage.getItem("rehab_minimax_male_timbre") || "cantonese_male";
+  state.minimaxFemaleTimbre = localStorage.getItem("rehab_minimax_female_timbre") || "cantonese_female";
+  // 註：API 金鑰蓄意不在備份範圍內，因此不重讀，維持目前工作階段設定。
+}
+
+/** 匯出全量保險箱備份為 JSON 檔。備份**不含** API 金鑰（見 db.js EXPORTABLE_SETTINGS）。 */
+async function downloadVaultBackup() {
+  try {
+    const json = state.vaultMode === "indexeddb"
+      ? await RehabCounselorDB.exportFullBackupJSON()
+      : RehabCounselorDB.buildBackupJSON(state.historySessions, getCustomCases());
+
+    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const d = new Date();
+    const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    a.download = `RehabCounselor_Vault_${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (e) {
+    console.error("[Vault] 匯出備份失敗：", e);
+    alert(`匯出備份失敗：${e.message}`);
+    return false;
+  }
+}
+
+/** 由使用者選定的 JSON 檔覆蓋式還原保險箱。 */
+async function restoreVaultBackup(file) {
+  if (state.vaultMode !== "indexeddb") {
+    alert("⚠️ 目前 IndexedDB 不可用（可能為無痕瀏覽模式），無法執行還原。\n請改用一般瀏覽視窗開啟本平台後再試。");
+    return false;
+  }
+
+  let text = "";
+  try {
+    text = await file.text();
+  } catch (e) {
+    alert(`無法讀取備份檔案：${e.message}`);
+    return false;
+  }
+
+  if (!confirm("⚠️ 覆蓋式還原\n\n此操作會先清空目前保險箱內的所有面談紀錄與自定義個案，再寫入備份檔內容。\n\n目前尚未備份的資料將會遺失。確定繼續嗎？")) {
+    return false;
+  }
+
+  try {
+    const result = await RehabCounselorDB.importFullBackupJSON(text);
+    // 還原後重新載入記憶體副本，並把小型設定重新讀入 state。
+    await hydrateVault();
+    refreshStateFromLocalStorage();
+    updateStaticUIStrings();
+    updateApiBadge();
+    AudioSynth.playSuccess();
+    alert(`✅ 還原成功：${result.sessions} 場面談紀錄、${result.customCases} 個自定義個案已寫回保險箱。`);
+    return true;
+  } catch (e) {
+    console.error("[Vault] 還原失敗：", e);
+    AudioSynth.playError();
+    alert(`還原失敗：${e.message}`);
+    return false;
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
-  initApp();
+  initApp().catch((e) => {
+    console.error("[RehabCounselor] 啟動失敗：", e);
+  });
 });
 
-function initApp() {
+async function initApp() {
   // 自動將廢棄/已移除的模型 (gemini-2.0-flash, gemini-1.5-flash) 升級至預設的 gemini-2.5-flash
   if (state.selectedModel === "gemini-2.0-flash" || state.selectedModel === "gemini-1.5-flash") {
     state.selectedModel = "gemini-2.5-flash";
@@ -361,7 +580,11 @@ function initApp() {
   initThemeToggle();
   initSpeechEngine();
 
-  // 3. Load default view (Dashboard)
+  // 3. ADR-0005：載入本地保險箱。必須在首次渲染之前完成，
+  //    否則儀表板與分析頁會先讀到空的 state.historySessions。
+  await hydrateVault();
+
+  // 4. Load default view (Dashboard)
   switchView("dashboard");
 }
 
@@ -474,12 +697,8 @@ function renderDashboard(container) {
   }
 
   // Calculate dynamic stats
-  let historySessions = [];
-  try {
-    historySessions = JSON.parse(localStorage.getItem("rehab_sessions_history")) || [];
-  } catch (e) {
-    historySessions = [];
-  }
+  // ADR-0005：改讀記憶體副本（開機時由 hydrateVault() 從 IndexedDB 載入）
+  const historySessions = state.historySessions;
 
   let completedModules = 0;
   if (state.theoryProgress) {
@@ -2359,7 +2578,7 @@ function renderCaseCatalog(container) {
 
       // 5. Filter by Origin
       if (filterOrigin !== "all") {
-        const isPrebuilt = ["case_01", "case_02", "case_03", "case_04"].includes(c.id);
+        const isPrebuilt = BUILTIN_CASE_IDS.has(c.id);
         if (filterOrigin === "prebuilt" && !isPrebuilt) return false;
         if (filterOrigin === "custom" && isPrebuilt) return false;
       }
@@ -2394,7 +2613,7 @@ function renderCaseCatalog(container) {
 
     cardsGrid.innerHTML = filtered.map(c => {
       const themeClass = getCaseThemeClass(c);
-      const isCustom = !["case_01", "case_02", "case_03", "case_04"].includes(c.id);
+      const isCustom = !BUILTIN_CASE_IDS.has(c.id);
       
       return `
         <div class="dossier-card ${themeClass}" style="transform-style: preserve-3d;">
@@ -2823,7 +3042,7 @@ function renderCaseGenerator(container) {
   }
 
   // Bind case import logic
-  document.getElementById("synthesis-import-btn").addEventListener("click", () => {
+  document.getElementById("synthesis-import-btn").addEventListener("click", async () => {
     const code = document.getElementById("synthesis-import-code").value.trim();
     if (!code) {
       alert("請先貼上有效的個案基因碼！");
@@ -2838,8 +3057,9 @@ function renderCaseGenerator(container) {
       decodedData.id = `imported_${Date.now()}`;
       state.cases.unshift(decodedData);
       
-      const customCases = state.cases.filter(c => !["case_01", "case_02", "case_03", "case_04"].includes(c.id));
-      localStorage.setItem("rehab_custom_cases", JSON.stringify(customCases));
+      // ADR-0005：寫入 IndexedDB 保險箱（自定義個案判定改用 BUILTIN_CASE_IDS，
+      // 舊版硬編碼 case_01~04 會把三個較新的內建個案誤存為自定義個案並造成重複顯示）。
+      await persistCustomCases();
       
       checkAndUnlockAchievements("case_creator");
       alert(`🎉 成功導入個案：${decodedData.name} (${decodedData.health_condition})！已存入大廳。`);
@@ -3016,16 +3236,14 @@ function renderCaseGenerator(container) {
             enterBtn.style.display = "inline-flex";
 
             // Trigger click particles burst
-            writeBtn.addEventListener("click", (e) => {
+            writeBtn.addEventListener("click", async (e) => {
               const rect = e.target.getBoundingClientRect();
               triggerConfetti(rect.left + 40, rect.top + window.scrollY);
 
               if (!state.cases.some(c => c.id === geminiResult.id)) {
                 state.cases.unshift(geminiResult);
               }
-              localStorage.setItem("rehab_custom_cases", JSON.stringify(
-                state.cases.filter(c => !["case_01", "case_02", "case_03", "case_04"].includes(c.id))
-              ));
+              await persistCustomCases(); // ADR-0005
               checkAndUnlockAchievements("case_creator");
 
               alert(`🎉 個案「${geminiResult.name}」已順利寫入大廳首位！`);
@@ -3035,16 +3253,14 @@ function renderCaseGenerator(container) {
               if (catalogBtn) catalogBtn.click();
             });
 
-            enterBtn.addEventListener("click", (e) => {
+            enterBtn.addEventListener("click", async (e) => {
               const rect = e.target.getBoundingClientRect();
               triggerConfetti(rect.left + 40, rect.top + window.scrollY);
 
               if (!state.cases.some(c => c.id === geminiResult.id)) {
                 state.cases.unshift(geminiResult);
               }
-              localStorage.setItem("rehab_custom_cases", JSON.stringify(
-                state.cases.filter(c => !["case_01", "case_02", "case_03", "case_04"].includes(c.id))
-              ));
+              await persistCustomCases(); // ADR-0005
               checkAndUnlockAchievements("case_creator");
               
               // Direct roleplay enter
@@ -4125,14 +4341,8 @@ async function endRoleplaySession() {
       report: report
     };
     
-    let historySessions = [];
-    try {
-      historySessions = JSON.parse(localStorage.getItem("rehab_sessions_history")) || [];
-    } catch (e) {
-      historySessions = [];
-    }
-    historySessions.unshift(completedSession);
-    localStorage.setItem("rehab_sessions_history", JSON.stringify(historySessions));
+    // ADR-0005：寫入 IndexedDB 保險箱並同步更新記憶體副本。
+    await persistCompletedSession(completedSession);
 
     // Play physical success sound
     AudioSynth.playSuccess();
@@ -5120,12 +5330,8 @@ function generateLongitudinalChartHTML(historySessions) {
    ========================================================================== */
 function renderAnalytics(container) {
   // Get history sessions
-  let historySessions = [];
-  try {
-    historySessions = JSON.parse(localStorage.getItem("rehab_sessions_history")) || [];
-  } catch (e) {
-    historySessions = [];
-  }
+  // ADR-0005：改讀記憶體副本（開機時由 hydrateVault() 從 IndexedDB 載入）
+  const historySessions = state.historySessions;
 
   // Calculate dynamic average scores across all history sessions
   let empathySum = 0;
@@ -5851,6 +6057,41 @@ function renderSettings(container) {
       </form>
 
       <div style="border-top: 1px solid var(--card-border); margin-top: 20px; padding-top: 20px;">
+        <h4 style="font-size:0.88rem; font-weight:800; color:var(--accent-cyan); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <i class="fa-solid fa-shield-halved"></i> 資料保險箱 (Local Vault)
+        </h4>
+        <div style="background:rgba(34,211,238,0.04); border:1px dashed rgba(34,211,238,0.25); border-radius:8px; padding:12px 16px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:220px;">
+              <p style="font-size:0.78rem; color:var(--text-bright); font-weight:700; margin-bottom:2px;">
+                目前儲存：${state.historySessions.length} 場面談紀錄 · ${getCustomCases().length} 個自定義個案
+              </p>
+              <p style="font-size:0.72rem; color:var(--text-muted); line-height:1.4;">
+                儲存引擎：${state.vaultMode === "indexeddb"
+                  ? '<span style="color:var(--accent-green); font-weight:700;">IndexedDB 大容量保險箱</span>（數百 MB，不受 5MB 配額限制）'
+                  : '<span style="color:var(--accent-red); font-weight:700;">⚠️ localStorage 唯讀降級模式</span>（IndexedDB 不可用，可能為無痕瀏覽視窗；新紀錄仍受 5MB 配額限制，且無法執行還原）'}
+              </p>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button id="rp-vault-export-btn" type="button" style="background:rgba(34,211,238,0.12); border:1px solid rgba(34,211,238,0.4); color:var(--accent-cyan); font-weight:700; padding:6px 14px; border-radius:8px; cursor:pointer; font-size:0.75rem; white-space:nowrap; transition:all 0.25s ease;">
+                <i class="fa-solid fa-download"></i> 匯出全量備份
+              </button>
+              <button id="rp-vault-import-btn" type="button" style="background:rgba(148,163,184,0.12); border:1px solid rgba(148,163,184,0.4); color:var(--text-bright); font-weight:700; padding:6px 14px; border-radius:8px; cursor:pointer; font-size:0.75rem; white-space:nowrap; transition:all 0.25s ease;">
+                <i class="fa-solid fa-upload"></i> 匯入備份還原
+              </button>
+              <input type="file" id="rp-vault-import-input" accept="application/json,.json" style="display:none;">
+            </div>
+          </div>
+          <p style="font-size:0.7rem; color:var(--text-muted); line-height:1.5; margin-top:10px; padding-top:10px; border-top:1px dashed rgba(148,163,184,0.18);">
+            <i class="fa-solid fa-lock" style="color:var(--accent-green);"></i>
+            備份檔包含全部面談逐字紀錄、臨床評核報告、自定義個案、成就與理論進度，
+            <b style="color:var(--text-bright);">但蓄意不含 Gemini / MiniMax API 金鑰</b>，可安全轉存或交予督導。
+            還原為覆蓋式操作，會先清空現有保險箱。
+          </p>
+        </div>
+      </div>
+
+      <div style="border-top: 1px solid var(--card-border); margin-top: 20px; padding-top: 20px;">
         <h4 style="font-size:0.88rem; font-weight:800; color:var(--accent-red); display:flex; align-items:center; gap:8px; margin-bottom:8px;">
           <i class="fa-solid fa-triangle-exclamation"></i> 危險區域 (Danger Zone)
         </h4>
@@ -6011,10 +6252,56 @@ function renderSettings(container) {
     if (dashLink) dashLink.click();
   });
 
+  // ADR-0005：資料保險箱 匯出 / 還原
+  const vaultExportBtn = document.getElementById("rp-vault-export-btn");
+  if (vaultExportBtn) {
+    vaultExportBtn.addEventListener("click", async () => {
+      AudioSynth.playClick();
+      const originalHTML = vaultExportBtn.innerHTML;
+      vaultExportBtn.disabled = true;
+      vaultExportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 匯出中...';
+      const ok = await downloadVaultBackup();
+      vaultExportBtn.innerHTML = ok
+        ? '<i class="fa-solid fa-check"></i> 已匯出'
+        : originalHTML;
+      if (ok) AudioSynth.playSuccess();
+      setTimeout(() => {
+        vaultExportBtn.disabled = false;
+        vaultExportBtn.innerHTML = originalHTML;
+      }, 2000);
+    });
+  }
+
+  const vaultImportBtn = document.getElementById("rp-vault-import-btn");
+  const vaultImportInput = document.getElementById("rp-vault-import-input");
+  if (vaultImportBtn && vaultImportInput) {
+    vaultImportBtn.addEventListener("click", () => {
+      AudioSynth.playClick();
+      vaultImportInput.click();
+    });
+    vaultImportInput.addEventListener("change", async () => {
+      const file = vaultImportInput.files && vaultImportInput.files[0];
+      // 無論成敗都要清空 input.value，否則同工再選同一個檔案不會觸發 change。
+      if (!file) { vaultImportInput.value = ""; return; }
+      const ok = await restoreVaultBackup(file);
+      vaultImportInput.value = "";
+      if (ok) switchView("settings"); // 重新渲染設定頁以更新保險箱用量顯示
+    });
+  }
+
   // Attach Settings Reset Progress Submit
   const resetBtn = document.getElementById("rp-reset-progress-btn");
   if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
+    resetBtn.addEventListener("click", async () => {
+      // ADR-0005：破壞性操作前先引導匯出備份，避免無備份的不可逆資料遺失。
+      const sessionCount = state.historySessions.length;
+      const customCount = getCustomCases().length;
+      if (sessionCount > 0 || customCount > 0) {
+        if (confirm(`💾 保險箱內現有 ${sessionCount} 場面談紀錄、${customCount} 個自定義個案。\n\n建議先匯出備份再重設。\n\n按「確定」立即匯出備份檔；按「取消」則跳過備份直接繼續。`)) {
+          await downloadVaultBackup();
+        }
+      }
+
       if (!confirm("⚠️ 同工，你確定要清除所有的學習進度嗎？\n此操作將會清除所有歷史對話報告、自定義個案與成就徽章，且不可還原！")) {
         return;
       }
@@ -6025,7 +6312,12 @@ function renderSettings(container) {
       // 1. Play warning sound
       AudioSynth.playWarning();
 
-      // 2. Clear LocalStorage variables
+      // 2a. ADR-0005：清空 IndexedDB 保險箱。
+      //     若少了這一步，重設後看似清空，但下次開機 hydrateVault() 會把舊資料整批撈回來。
+      await RehabCounselorDB.clearAll();
+      state.historySessions = [];
+
+      // 2b. Clear LocalStorage variables
       localStorage.removeItem("rehab_sessions_history");
       localStorage.removeItem("rehab_custom_cases");
       localStorage.removeItem("rehab_unlocked_achievements");

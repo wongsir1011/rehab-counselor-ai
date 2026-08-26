@@ -4,6 +4,58 @@
 
 ---
 
+## [v20260827_v18_adr0005] - 2026-08-27 (香港時間 UTC+8)
+
+### 🔐 本地保險箱遷移至 IndexedDB，並實裝一鍵全量備份／還原，兌現 ADR-0005
+*   **面談歷史與自定義個案遷出 localStorage (IndexedDB Vault)**：
+    *   `app.js` 直接 import `src/utils/db.js` 的 `RehabCounselorDB`（該檔原本已寫好但從未被任何模組引用，屬孤兒程式碼；`src/` 其餘 18 個檔案仍未接線，去留待決）。
+    *   儲存分層：**只有會無限長大的資料**（`rehab_sessions_history`、`rehab_custom_cases`）搬入 IndexedDB；其餘 18 個小型 key（金鑰、語音設定、成就、理論進度，合計僅數 KB）刻意留在 `localStorage`，避免每個讀取點被迫改為 `await` 而毫無收益。
+    *   解除原本約 20 場面談即撐爆 5MB 配額的天花板。
+*   **同步／非同步衝突的解法 (Hydrate-Once Pattern)**：
+    *   `localStorage` 為同步，IndexedDB 為非同步，而 `app.js` 有 6000+ 行同步渲染碼。
+    *   改為開機時一次性載入：`initApp()` 改為 `async`，於最後一行 `switchView("dashboard")` **之前** `await hydrateVault()`，把保險箱內容讀入 `state.historySessions` 與 `state.cases`。所有渲染函式維持同步讀取記憶體副本，簽章一律不變。
+    *   `state.cases` 原本的 module 頂層同步 IIFE 簡化為 `[...MOCK_CASES]`，自定義個案改由 `hydrateVault()` 非同步注入。
+*   **遷移先驗證後刪除 (Verified Migration)**：
+    *   `migrateFromLocalStorage()` 寫入 IndexedDB 後**逐筆比對 id 確認全數落地**，才刪除 `localStorage` 副本 —— 刪除這一步才是真正釋放配額，少了它等於整個 ADR 沒做。任何一筆寫入失敗即拋錯並完整保留原始資料。
+    *   改為**每次開機都檢查** `localStorage`（而非「遷移過就永不再看」）。原因：IndexedDB 暫時不可用時 app 會降級寫入 `localStorage`，若只認旗標，那些紀錄會在 IndexedDB 恢復後被永久遺留。吸收動作以 id 為 keyPath 覆寫，重複執行安全。
+*   **一鍵全量備份／還原 (1-Click Backup & Restore)**：
+    *   設定頁新增「資料保險箱 (Local Vault)」區塊，顯示目前用量與儲存引擎，提供匯出 `RehabCounselor_Vault_YYYY-MM-DD.json` 與覆蓋式還原。
+    *   ⚠️ **備份檔蓄意不含 Gemini／MiniMax API 金鑰**（`db.js` 的 `EXPORTABLE_SETTINGS` 白名單），令備份可安全轉存或交予督導。
+    *   還原流程為「先完整驗證 → `clearAll()` → 寫入」，避免格式有問題時已把現有資料清掉。
+*   **重置流程補上保險 (Danger Zone Hardening)**：
+    *   重置前先詢問是否匯出備份，才進入原本的兩道破壞性確認。
+    *   重置時加入 `await RehabCounselorDB.clearAll()`。**先前只清 `localStorage`，改用 IndexedDB 後會造成重置看似成功、下次開機資料整批復活。**
+*   **IndexedDB 不可用時大聲降級 (Loud Degradation)**：
+    *   Safari 無痕模式等情境下 `probe()` 失敗時，退回 `localStorage` 唯讀並在設定頁以紅字明示「⚠️ localStorage 唯讀降級模式」，還原功能一併封鎖並說明原因，而非靜默顯示空白歷史令同工誤以為訓練紀錄遺失。
+
+### 🐛 順帶修復：內建個案被誤判為自定義個案
+*   `app.js` 三處持久化邏輯與兩處大廳 UI 邏輯硬編碼 `["case_01".."case_04"]` 作為內建個案清單，但 `mockData.js` 的 `MOCK_CASES` 實際有 **7** 個內建個案。
+*   後果：`case_mental_cheng`、`case_asd_kahou`、`case_sensory_meiling` 會被當成自定義個案寫入儲存，開機後與 `MOCK_CASES` **重複顯示兩次**，且在大廳被錯誤標示為「AI 基因合成」。
+*   統一改用自 `MOCK_CASES` 推導的 `BUILTIN_CASE_IDS`，並在 `hydrateVault()` 過濾掉歷史遺留的污染副本。
+
+### ✅ 驗證 (Verification)
+*   `python3 check_syntax.py` 全數通過。
+*   於 `http://localhost:8765` 以真實瀏覽器實測，全數通過：
+    *   **遷移**：預先在 `localStorage` 植入 3 場面談＋2 個個案 → 開機後 IndexedDB 收到 3＋2 筆、遷移旗標寫入、`localStorage` 副本已刪除。
+    *   **個案去重**：大廳顯示 8 張卡、零重複，三個較新的內建個案正確標示為內建。
+    *   **備份往返**：匯出 → `clearAll()`（歸零）→ 還原，3 場面談與逐字 SOAP 內容完全一致；`localStorage` 未被回寫。
+    *   **金鑰隔離**：植入假金鑰後掃描備份檔，兩個金鑰皆未出現。
+    *   **重置**：備份提示正確出現於兩道確認之前；重置後 IndexedDB 歸零，且**重載後資料未復活**。
+    *   **降級模式**：以測試載具封鎖 `indexedDB` → 設定頁正確顯示紅字降級警告、匯出仍含真實資料（非空白備份）、還原被擋並顯示說明。
+    *   **滯留吸收**：降級模式寫入的紀錄，在 IndexedDB 恢復後開機即被吸收並清除 `localStorage`。
+    *   **存檔路徑**：全新使用者離線模式跑完一場 4 輪面談並結束 → 紀錄含評核報告寫入 IndexedDB，`localStorage` 全程未被用於大宗資料。
+*   ⚠️ 未實測項目：真實 Gemini API 金鑰下的端對端流程；Safari 真實無痕視窗（降級路徑以測試載具模擬）。
+
+### 📦 變更檔案 (Files Changed)
+*   [src/utils/db.js](src/utils/db.js)：新增 `setMeta`/`getMeta`/`probe`/`getStats`/`buildBackupJSON`；重寫 `migrateFromLocalStorage()` 為先驗證後刪除且每次開機重檢；`importFullBackupJSON()` 移除會把大宗資料寫回 `localStorage` 的兩行（原本會令大備份還原直接 `QuotaExceededError`，且配額問題原封搬回）；`exportFullBackupJSON()` 加入設定白名單並排除金鑰。
+*   [app.js](app.js)：新增保險箱區段（`BUILTIN_CASE_IDS`、`getCustomCases`、`persistCustomCases`、`persistCompletedSession`、`hydrateVault`、`hydrateFromLocalStorageFallback`、`refreshStateFromLocalStorage`、`downloadVaultBackup`、`restoreVaultBackup`）；`initApp()` 改 async；改寫 3 處面談讀寫點與 3 處自定義個案寫入點；設定頁新增保險箱 UI 與事件處理；重置流程加入備份提示與 `clearAll()`。
+*   [index.html](index.html)：`app.js` 快取戳記更新至 `v20260827_v18_adr0005`。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：新增第 6 節「Persistence Layer: The Local Vault」；第 5 節註記金鑰不納入備份。
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 4 保險箱部分標記完成；加註本檔對 M2/M3 已知過時。
+*   [adr/0005-indexeddb-local-vault-persistence.md](adr/0005-indexeddb-local-vault-persistence.md)：狀態更新為已實作，並記錄三項與原決策的偏離。
+
+---
+
 ## [v20260815_v15_milestone1] - 2026-08-15T00:52:03+08:00 (香港時間 UTC+8)
 
 ### 🎙️ Milestone 1 交付：連續廣東話語音辨識與 MiniMax 雙引擎神經語音 (Milestone 1 Delivered)

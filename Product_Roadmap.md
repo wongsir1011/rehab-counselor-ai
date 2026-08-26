@@ -27,8 +27,12 @@ Counselors can instantly generate unlimited custom Hong Kong disability cases ta
 
 ---
 
-### Milestone 4: Clinical Portfolio Exporter & Safe Vault [Planned 📅]
+### Milestone 4: Clinical Portfolio Exporter & Safe Vault [Safe Vault Delivered ✅]
 **User-Facing Value**:  
 After completing a counseling session, counselors receive a 5-dimension clinical radar evaluation and can export a formatted clinical case report (containing full verbatim transcripts, completed SOAP notes, and the ICF diagnostic matrix) for internal agency supervision. All session histories and custom cases are permanently preserved in a local browser vault with 1-click JSON backup and restore capabilities.  
 *Traces to PRD: USER JOURNEY Step 5, SUCCESS, HARD CONSTRAINTS (Roles & Privacy, SSOT)*  
-*Plan*: [`plan/04-portfolio-exporter-safe-vault.md`](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/plan/04-portfolio-exporter-safe-vault.md)
+*Plan*: [`plan/04-portfolio-exporter-safe-vault.md`](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/plan/04-portfolio-exporter-safe-vault.md) *(file absent from repo — broken link, as are the plan/02 and plan/03 links above)*
+
+**Safe Vault delivered 2026-08-27** per [ADR-0005](adr/0005-indexeddb-local-vault-persistence.md): session history and custom cases moved from `localStorage` to IndexedDB (`RehabCounselorDB`), with verified boot-time migration, 1-click full-vault JSON backup/restore under Settings → 資料保險箱, a backup prompt before the Danger Zone reset, and an explicit degraded mode when IndexedDB is unavailable. Backups deliberately exclude API keys. See `ARCHITECTURE.md` §6.
+
+> ⚠️ **This roadmap is known to be stale for Milestones 2 and 3**, marked "Next"/"Planned" above but in fact already implemented in `app.js` (supervisor hints, case generator, ICF sandbox, radar report, Markdown session export). A full reconciliation pass is pending a separate decision.
