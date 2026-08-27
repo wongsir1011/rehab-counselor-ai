@@ -1,6 +1,6 @@
 # Milestone 5 Plan: 同一口氣的雙軌回應
 
-* **Status**: Built; awaiting real-key end-to-end verification ⏳
+* **Status**: Built (`24e8a85`); **one regression found in peer review — not yet delivered** ⚠️
 * **Approved**: 2026-08-27 23:36 HKT (UTC+8)
 * **Roadmap Ref**: [Product Roadmap Milestone 5](../Product_Roadmap.md)
 * **Traces to PRD v3**: `SUCCESS`; `HARD CONSTRAINTS → AI Gateway & Validation`; `HARD CONSTRAINTS → No Fabricated Clinical Content`
@@ -103,3 +103,39 @@ Schema：
 ## 6. 批准時記錄的非顯然決定
 
 開場寫死督導提示（3.5）與失敗回合孤立記錄回滾（3.6）納入本里程碑，因兩者都位於 M5 必須改動的同一條回合管線上，而 M5 令督導面板預設可見會直接放大這兩個既有缺陷；離線示範的面板層標示（3.7）僅為防止 M5 令現況變差，逐句標示與無劇本個案封鎖仍留給 M6。
+
+---
+
+## 8. 同儕審查結果（2026-08-28 02:26 HKT）
+
+審查以實際執行為準，未修改任何程式碼。
+
+### 重跑上一輪確認可用的流程
+`check_syntax.py`、stub `fetch` 主路徑（`callCount === 1`）、瀏覽器首回合提示無需點擊即可讀、切換與標籤同步、失敗回合回填與孤立氣泡移除 —— **在目前版本全部仍然可用**。
+
+### 新增的回歸測試
+以 stub 逐一呼叫 `generateCustomCase` / `generateSessionReport` / `generateCustomQuiz` / `generateSoapSuggestions`，四者的 `generationConfig.responseSchema` 皆為 `undefined`，證明 `callGeminiAPI` 加入第 7 個參數未波及既有呼叫點。
+
+### 🔴 必須修正：D15 — 督導干預指令在失敗回合後靜默遺失
+
+本里程碑 §3.6 的失敗回滾引入。`app.js:3762` 在 API 呼叫**之前**清空 `promptModifiers`；回滾又把承載該指令文字的孤立 history 項目 pop 掉，指令因而徹底消失。同工按下「⚠️ 突發抗拒」→ 該回合失敗 → 重試 → 干預不再生效，**畫面上無任何提示**。
+
+A/B 實測（相同攔截手法，`063acdc` 另起 8766 埠對照）：
+
+| 版本 | 第 2 次請求是否仍含 `臨床督導即時注入指令` |
+| :--- | :--- |
+| `063acdc`（M5 之前） | ✅ 仍在（靠孤立 history 殘留） |
+| `24e8a85`（M5） | ❌ 已遺失 |
+
+違反專案原則「發生錯誤時呈現真實錯誤，不得假裝成功」。修正方向為失敗時把 modifiers 放回佇列 —— 屬下一輪 CRITIQUE 範疇，審查階段不修。
+
+### 已記錄，不阻塞
+- **D16**：督導面板以 `innerHTML` 渲染模型輸出，實測 `<img onerror>` 會執行。**既存問題，M5 未加劇**（舊版同樣賦值 `innerHTML`，且 `display:none` 不阻止 `onerror`）。
+- **D17**：Phase 13 督導干預功能不在 PRD v3 內，屬 2026-08-27 審計漏列。
+- **D5 補充**：內建個案劇本僅 1–3 回合，四個個案第 2 回合起即落入通用假對白。
+
+### 本輪未重新測試
+MiniMax TTS 雙引擎與性別音色綁定、連續 STT（需麥克風）、保險箱遷移／備份／還原、面談結束→雷達報告→匯出、ICF 沙盒、理論學習 Hub、MI 五關卡、小組研習、學習分析、成就徽章，以及**真實 Gemini 金鑰端對端**（`propertyOrdering` 是否被模型接受仍未知）。
+
+### 設計上的已知極限
+角色 A 對 `reply` 的「禁止旁白／括號註解」是 **prompt 層約束，無程式層強制**。schema 只保證欄位存在與型別，管不到內容；模型若不遵守，含旁白的文字會直接送入 TTS 朗讀。

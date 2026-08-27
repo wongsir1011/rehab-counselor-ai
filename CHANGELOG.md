@@ -4,6 +4,46 @@
 
 ---
 
+## [v20260828_v22_m5_review] - 2026-08-28 02:26 (香港時間 UTC+8)
+
+本次為同儕審查記錄提交，**不涉及任何執行碼變更**。審查對象為 `24e8a85`（Milestone 5），全程以實際執行為準，未修改程式碼。
+
+### 🔴 發現 Milestone 5 自身引入的回歸（D15）
+*   **督導干預指令在失敗回合後靜默遺失**。M5 的失敗回滾（`plan/05` §3.6）造成：`app.js:3762` 在 API 呼叫**之前**清空 `state.activeSession.promptModifiers`，而回滾又把承載該指令文字的孤立 history 項目 pop 掉，指令因而徹底消失。同工按下「⚠️ 突發抗拒」→ 該回合失敗 → 重試 → 干預不再生效，**畫面上無任何提示**。
+*   **A/B 實測證據**：把 `063acdc`（M5 之前）取出於另一埠（8766）啟動，以完全相同的 fetch 攔截手法比對整個請求主體 —— 舊版第 2 次請求**仍含** `臨床督導即時注入指令`（靠孤立 history 殘留），M5 版**已遺失**。
+*   第一次量測抓錯位置（只看最後一段 prompt，而該指令在舊版是留在 `contents` 的歷史項目內），修正方法後重測才得到上述結果。
+*   違反專案編碼原則「發生錯誤時向使用者呈現真實錯誤，不得假裝成功」。**修正前 Milestone 5 不算交付**，`Product_Roadmap.md` 狀態已改為「同儕審查發現回歸待修 ⚠️」。
+
+### 🟡 已記錄、不阻塞的發現
+*   **D16 — 督導面板以 `innerHTML` 渲染模型輸出**（`app.js:3810`）。實測 `<img src=x onerror=…>` **確實執行**（`window.__XSS` 被設定）。案主對白是安全的（`renderChatBubble` 使用 `textContent`），僅此一處。**屬既存問題，M5 未加劇** —— 舊版同樣賦值 `innerHTML`，且 `display:none` 不阻止 `onerror` 觸發。惟存在一條具體可達鏈：個案「基因碼」導入（`synthesis-import-btn`）接受來自他人的任意 base64 字串，可挾帶提示注入，而 `localStorage` 內存著 API 金鑰。
+*   **D17 — Phase 13 督導即時干預功能不在 PRD v3 內**。`promptModifiers`、四顆指令按鈕與 `rp-intervention-send-btn` 是完整功能，但 PRD 全文 grep `intervention|inject|干預|directive` 零命中。此為 2026-08-27 23:14 審計的漏列。**依 SSOT 規則不修改 PRD 迎合實作**，僅記錄偏差，待擁有者決定。
+*   **D5 補充實測數據**：七個內建個案的 `roleplay_flow` 僅 1–3 回合，`case_02`／`case_mental_cheng`／`case_asd_kahou`／`case_sensory_meiling` **第 2 回合起**即落入通用假對白。M5 加入的面板層「示範劇本」標記涵蓋整個離線模式，但對話氣泡本身仍無標示（屬 Milestone 6）。
+
+### ✅ 以實際執行確認無恙的項目
+*   **上一輪流程在目前版本仍可用**：`check_syntax.py` 全綠；stub 主路徑 `callCount === 1`；瀏覽器首回合提示無需點擊即可讀；切換與標籤同步；失敗回合回填與孤立氣泡移除。
+*   **新增回歸測試**：以 stub 逐一呼叫 `generateCustomCase`／`generateSessionReport`／`generateCustomQuiz`／`generateSoapSuggestions`，四者的 `generationConfig.responseSchema` 皆為 `undefined`，證明 `callGeminiAPI` 第 7 個參數未波及既有呼叫點。
+*   **邊界情況實跑**：連續兩次失敗無氣泡累積（7 → 7 → 7）；等待期間打字後失敗不覆蓋新輸入；手動收合後新回合被強制展開（符合 PRD「visible by default on arrival」，屬預期行為）。
+*   **接縫**：`setCoachPanelVisible()` 為 top-level 宣告，三個呼叫點均在其後；`clientShortName` 全檔零殘留；失敗回滾的氣泡守衛 `classList.contains("bubble-user")` 與 `renderChatBubble` 的 `bubble-${sender}` 命名相符。
+*   **資料表**：本輪與 M5 皆未動 `src/utils/db.js`，`DB_VERSION` 維持 1，無 schema 變更、無 migration、無刪表重建。
+*   **存取模型**：無變動，仍為單人本地優先、無帳號、無伺服器權限關卡，恰如 PRD v3。
+
+### ⚠️ 本輪未重新測試（誠實列出）
+MiniMax TTS 雙引擎與性別音色綁定、連續廣東話 STT（需麥克風）、保險箱遷移／備份／還原、面談結束→雷達報告→Markdown 匯出、ICF 沙盒、理論學習 Hub、MI 五關卡、小組研習、學習分析、成就徽章，以及**真實 Gemini 金鑰端對端**（`propertyOrdering` 是否被模型接受仍未知）。
+
+### 📐 設計上的已知極限（非缺陷，供日後查閱）
+角色 A 對 `reply` 的「禁止旁白、動作描述、括號註解」是 **prompt 層約束，無程式層強制**。`responseSchema` 只保證欄位存在與型別，管不到內容；模型若不遵守，含旁白的文字會直接送入 TTS 朗讀。
+
+### 📦 變更檔案 (Files Changed)
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§7 新增「Findings from the Milestone 5 peer review」小節（D15／D16／D17），D5 補上實測的劇本長度數據。
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 5 狀態改為「已建置，同儕審查發現回歸待修 ⚠️」，並註明修正前不算交付。
+*   [plan/05-synchronous-dual-track-response.md](plan/05-synchronous-dual-track-response.md)：新增第 8 節同儕審查結果，含 A/B 對照表與未測清單。
+*   [Product_Roadmap.md](Product_Roadmap.md)：另修正一處文件矛盾 —— Milestone 2 原標記「Half Delivered ⚠️／同步性未兌現」，但該半邊已由 M5 建置完成，改標記為「Completed ✅」並註明同步性由 M5 補齊。
+*   [CHANGELOG.md](CHANGELOG.md)：本條目。
+
+**未更動**：`PRD.md`（產品意圖 SSOT，偏差記於本檔而非反向修改 PRD）、`DECISIONS.md` 與 `adr/`（本輪為審查，未作出新的架構決策，不虛構 ADR）。
+
+---
+
 ## [v20260828_v21_m5] - 2026-08-27 23:43 (香港時間 UTC+8)
 
 ### ⚡ Milestone 5 交付：同一口氣的雙軌回應，兌現 ADR-0002

@@ -13,14 +13,14 @@ Counselors experience uninterrupted spoken Cantonese roleplay. Voice input liste
 
 ---
 
-### Milestone 2: The Synchronous AI Clinical Supervisor [Half Delivered ⚠️]
+### Milestone 2: The Synchronous AI Clinical Supervisor [Completed ✅]
 **User-Facing Value**:  
 During live roleplay, every counselor turn delivers a lightning-fast (<1.5s), simultaneous double-track response: the client's realistic Cantonese reaction on the main stage, and an instant clinical supervisor micro-hint in the sidebar. The hint pinpoints client motivational signals (Change Talk, Sustain Talk, experiential avoidance) and suggests precise next-step OARS or ACT interventions.  
 *Traces to PRD: USER JOURNEY Step 3, SUCCESS, HARD CONSTRAINTS (AI Gateway & Validation)*  
 *Plan*: 未撰寫（`plan/02` 從未建立）
 
-**已兌現**：督導提示的內容與臨床品質，已在 `app.js` 運作。  
-**未兌現**：同步性。目前是先取案主回應、再取督導提示的兩段式等待，未達 PRD SUCCESS 要求的「同時出現」。這一半由 **Milestone 5** 完成。
+**提示內容與臨床品質**：早已在 `app.js` 運作。  
+**同步性**：由 **Milestone 5**（`24e8a85`）補齊 —— 改為單次結構化往返，回應與提示同時到達且預設可見。M5 尚有一項與同步性無關的回歸待修（見下方 Milestone 5），但本里程碑承諾的雙軌同步已達成。
 
 ---
 
@@ -43,13 +43,15 @@ After completing a counseling session, counselors receive a 5-dimension clinical
 
 ---
 
-### Milestone 5: 同一口氣的雙軌回應 [已建置，待真實金鑰驗證 ⏳]
+### Milestone 5: 同一口氣的雙軌回應 [已建置，同儕審查發現回歸待修 ⚠️]
 **帶來的價值**：  
 同工說完一句話之後，案主的廣東話回應與督導提示**一起出現**，而不是先等案主講完、再等督導分析。等待時間減半，對話節奏終於接近真實面談 —— 這正是 Milestone 2 承諾卻尚未兌現的那一半。同時，督導提示不再可能是預先寫好的罐頭文字：拿不到真正的 AI 分析時，系統會直接說明失敗原因。
 
 **為何排在這裡**：它完成 Milestone 2，而且是 PRD SUCCESS 條款唯一還沒達成的部分。前四個里程碑建立的體驗都要靠它才算完整。  
 *Traces to PRD: SUCCESS, HARD CONSTRAINTS (AI Gateway & Validation)*  
-*Plan*: [`plan/05-synchronous-dual-track-response.md`](plan/05-synchronous-dual-track-response.md) — 已批准 2026-08-27 23:36 HKT  
+*Plan*: [`plan/05-synchronous-dual-track-response.md`](plan/05-synchronous-dual-track-response.md) — 已批准 2026-08-27 23:36 HKT，建置於 `24e8a85`  
+
+**未完成**：2026-08-28 02:26 HKT 同儕審查以 A/B 實測發現本里程碑自身引入一項回歸（`ARCHITECTURE.md` §7 **D15**）—— 督導干預指令在失敗回合後靜默遺失。修正前本里程碑不算交付。真實金鑰端對端驗證亦尚未執行。  
 *相關決策*：[ADR-0002](adr/0002-unified-structured-gemini-schema.md)
 
 ---

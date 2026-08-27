@@ -121,7 +121,7 @@ A full clause-by-clause audit of `PRD.md` against `origin/main` (`1d531a5`, byte
 | ~~D2~~ | ~~Two sequential calls, zero `responseSchema`~~ | **RESOLVED (M5)**: one `responseSchema`-constrained round-trip returning `{ reply, coachHint }`, verified by stub test asserting `callCount === 1`. |
 | ~~D3~~ | ~~Canned supervisor hint on failure~~ | **RESOLVED (M5)**: `generateCoachHint()` deleted. Failures surface the real error and leave the panel in a neutral, non-clinical state. |
 | ~~D4~~ | ~~Hard-coded opening hint asserting "強烈的抗拒姿態" for every case~~ | **RESOLVED (M5)**: replaced with a neutral empty state making no clinical claim. Necessary because M5 makes the panel permanently visible. |
-| D5 | Offline demo returns a generic scripted line when a case has no `roleplay_flow` — which is true of **every** AI-generated custom case — with no on-screen marking | `geminiService.js:183-186` | HARD CONSTRAINTS "no fake data" |
+| D5 | Offline demo returns a generic scripted line when a case has no `roleplay_flow` (true of **every** AI-generated custom case) **or when its script runs out**. Measured 2026-08-28: the seven built-in cases carry only 1–3 scripted turns — `case_02`, `case_mental_cheng`, `case_asd_kahou` and `case_sensory_meiling` fall through to the generic line from **turn 2 onward**. The chat bubble itself is still unmarked. | `geminiService.js:183-186`; `mockData.js` `MOCK_CASES` | HARD CONSTRAINTS "no fake data" |
 | D6 | SOAP/ICF drafts live only in `state.activeSession.notes`; no `beforeunload` guard anywhere; the UI nevertheless displays a green **"已安全備份"** indicator | `app.js:3427`, `app.js:3596`, `app.js:3576-3578` | HARD CONSTRAINTS "SOAP drafts reside … in IndexedDB" |
 
 ### Logged, non-blocking
@@ -145,6 +145,18 @@ PRD v3 tightened several clauses and added one wholly new obligation. Measured a
 | D14 | **No Fabricated Clinical Content** — scripted demo turns must be *visibly marked as scripted*, and a case with no authored script cannot be roleplayed without a key | **Partially addressed (M5)**: the coach panel now carries a persistent "示範劇本" badge whenever no key is set, so M5 does not make demo content more deceptive by revealing it. Per-turn marking on chat bubbles and blocking scriptless cases remain **Milestone 6**. |
 | ~~D1′~~ | ~~Supervisor hint visible by default on arrival~~ | **RESOLVED (M5)**, verified in-browser: hint readable with no click on the first turn. |
 | D6′ | Interface **must never claim a draft is saved when it is not** (v1 implied only the storage location) | The "已安全備份" indicator still makes the false claim. Milestone 7 must remove or truth-up the indicator, not only add the leave-guard. |
+
+### Findings from the Milestone 5 peer review (2026-08-28 02:26 HKT)
+
+Every item below was reproduced by running the app, not inferred from reading the diff.
+
+| ID | Finding | Evidence |
+| :--- | :--- | :--- |
+| **D15** | **Regression introduced by M5.** A supervisor intervention directive queued via the Phase 13 buttons is **silently lost** if that turn's API call fails. `app.js:3762` clears `state.activeSession.promptModifiers` *before* the request; the failure rollback added in M5 then pops the orphan history entry that used to carry the directive text. The counselor retries believing the intervention applies — it does not, and nothing on screen says so. | A/B tested with identical fetch interception against `063acdc` (pre-M5) served on a second port: old build's second request still contained `臨床督導即時注入指令`, the M5 build's did not. Violates the project principle that errors must surface rather than appear to succeed. |
+| D16 | The supervisor panel renders model output through `innerHTML` (`app.js:3810`), so markup emitted by the model executes. An `<img src=x onerror=…>` payload **actually fired** in testing. The client's own dialogue is safe (`renderChatBubble` uses `textContent`); this is the only such surface. **Pre-existing — M5 did not worsen it**, since the old code also assigned `innerHTML` and `display:none` does not suppress `onerror`. A reachable chain exists: the case "gene code" import (`synthesis-import-btn`) accepts arbitrary base64 from another person, which can carry a prompt injection, and the payload would execute in a browser whose `localStorage` holds the API keys. | Executed in-browser; `window.__XSS` was set. |
+| D17 | The Phase 13 supervisor intervention feature (`promptModifiers`, the four directive buttons, `rp-intervention-send-btn`) is **absent from `PRD.md` v3**. Missed by the 2026-08-27 23:14 audit. Per the SSOT rules the PRD is not edited to match the code — this is recorded as a deviation pending an owner decision. | `grep -niE "intervention\|inject\|干預\|directive" PRD.md` returns nothing. |
+
+Verified sound during the same review, by execution rather than assertion: the other four Gemini functions are unaffected by the `callGeminiAPI` signature change (`responseSchema === undefined` for all four under stub); two consecutive failures leave no bubble accumulation (7 → 7 → 7); a failure does not overwrite text the counselor typed while waiting; `setCoachPanelVisible()` is a top-level declaration with all three call sites after it; `clientShortName` has zero remaining references.
 
 ### Confirmed sound
 
