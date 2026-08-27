@@ -4,6 +4,49 @@
 
 ---
 
+## [v20260827_v19_docs_governance] - 2026-08-27 23:14 (香港時間 UTC+8)
+
+本次為文檔治理與全面審計提交，**不涉及任何執行碼變更**。
+
+### 📐 建立四支柱 SSOT 文檔治理 (ADR-0006)
+*   確立每份文件只負責一種權威：憲章 `CLAUDE.md`＝AI 行為、`PRD.md`＝產品意圖、程式碼（由 `ARCHITECTURE.md` 描述）＝實際行為、`CHANGELOG.md`＝歷史。
+*   新增 [adr/0006-four-pillar-ssot-documentation.md](adr/0006-four-pillar-ssot-documentation.md)，記錄採用方案、三個被否決方案與理由。
+*   `DECISIONS.md` 補上 ADR-0006，並為 ADR-0005 標註實作日期。
+
+### 🔍 PRD ↔ 程式碼全面審計（`origin/main` = `1d531a5`，與線上部署逐位元組相同）
+逐條核對 `PRD.md` v1 的 32 行原文，發現 **6 項阻塞級漂移**與 **6 項已記錄不阻塞漂移**，全數寫入 [ARCHITECTURE.md](ARCHITECTURE.md) 新增的第 7 節。其中兩項為本輪新發現：
+*   **D1（最嚴重）**：督導提示容器預設 `display:none`，且 `app.js:3816` 在**每一回合主動重設為隱藏**。同工每說一句都要再點一次才看得到提示。PRD USER JOURNEY 3 要求「delivered alongside client dialogue」，北極星承諾「real-time clinical supervision」—— 產品的核心價值目前藏在一顆每回合都要重按的按鈕後面。
+*   **D6**：SOAP／ICF 草稿只存在於 `state.activeSession.notes` 記憶體，全檔無 `beforeunload`，但畫面上有綠點寫著**「已安全備份」**（`app.js:3427`、`3596`）。這是對耐久性的不實聲明，且違反 PRD「SOAP drafts reside in IndexedDB」。
+*   另補記 D4（開場督導提示寫死，對所有個案一律宣稱「強烈的抗拒姿態」，不論其 MI 抗拒參數）與 D5（離線模式對所有 AI 生成個案回傳同一句假對白且無示範標示）—— 連同既知的 D3 罐頭提示，全系統共有**四處假資料**。
+
+### ✏️ 更正 ARCHITECTURE.md 的不實描述
+*   第 3.2 節原文宣稱「A single round-trip Gemini call with a strict `responseSchema` generates both `{ reply, coachHint }` in <1.5s」。**實況是兩次循序純文字呼叫，全檔 `responseSchema` 出現次數為 0。** 該段描述的是意圖而非實況，已改寫為實際行為並標註與 ADR-0002 的偏離。此正是 ADR-0006 否決「讓 ARCHITECTURE 描述目標設計」的具體案例。
+*   `Last Reconciled` 由 `2026-08-15 00:44:54 HKT` 更新為 `2026-08-27 23:14 HKT`。
+*   [adr/0002-unified-structured-gemini-schema.md](adr/0002-unified-structured-gemini-schema.md) 附加實作註記，指明該決策未反映於出貨程式碼，符合實作在 `rollback` 分支 `e06789d` 但從未合併。**決策原文與 Deciders 欄位一字未改**（ADR 不可追溯改寫）。
+
+### 🗺️ 路線圖重排為 Milestone 1–8
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 1–4 既有英文內容一字未改；更正 M2 為「Half Delivered ⚠️」（提示品質已交付、同步性未交付）、M3 與 M4 為「Completed ✅」（此前長期停留在 Next／Planned）。
+*   新增 M5「同一口氣的雙軌回應」（下一個）、M6「誠實的離線示範」、M7「不會憑空消失的面談」、M8「可信賴的本地紀錄」，全部可追溯至 PRD 具體條文，未發明 PRD 以外範圍。
+
+### 📎 補記：先前未寫入本檔的文檔提交 `9c87874`
+*   修正 `CHANGELOG.md`(26)、`DECISIONS.md`(5)、`Product_Roadmap.md`(4)、`plan/01`(1) 共 **36 個** `file:///Users/wongsir1011/.gemini/antigravity/scratch/...` 絕對連結為 repo 相對路徑。這些連結在 GitHub 上無法點擊、換機即失效，且指向本機另一個過時的 clone。
+*   移除 `Product_Roadmap.md` 內 `plan/02`、`plan/03`、`plan/04` 三個斷鏈（該三份 plan 從未撰寫）。
+*   新增 `CLAUDE.md` 至 `main`（此前只存在於已擱置的 `rollback` 分支 `b23fd66`），並更正兩處會誤導後續開發的描述：舊版把 `src/` 描述為使用中的模組化元件（實際只有 `src/utils/db.js` 被引用，其餘 18 個檔案從未被 import 卻仍被部署），以及補上快取戳記規範（無打包工具，不更新 `?v=` 參數則使用者看不到修改）。
+
+### ⚠️ 未處理事項（需擁有者決定）
+*   **`PRD.md` 仍為 v1，本輪未改動。** 審計發現五個已上線功能區（理論學習 Hub、小組研習 Studio、MI 五關卡遊戲、成就徽章、激勵金句）完全不在 PRD 內。此為 PRD 落後於產品實況，應由更新 PRD 解決而非移除功能 —— 而 PRD 變更需擁有者批准且不得靜默覆寫，故本輪僅記錄。
+*   本輪提出的 PRD v2 草案未獲批准，不作數。
+
+### 📦 變更檔案 (Files Changed)
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：更正第 3.2 節為實際行為；新增第 7 節「Known Drift: Code vs. PRD」；更新對帳時間。
+*   [Product_Roadmap.md](Product_Roadmap.md)：更正 M2/M3/M4 狀態，新增 M5–M8，加入檔頭用途說明。
+*   [DECISIONS.md](DECISIONS.md)：新增 ADR-0006，ADR-0005 標註實作日期。
+*   [adr/0006-four-pillar-ssot-documentation.md](adr/0006-four-pillar-ssot-documentation.md)：新增。
+*   [adr/0002-unified-structured-gemini-schema.md](adr/0002-unified-structured-gemini-schema.md)：附加實作註記。
+*   [CHANGELOG.md](CHANGELOG.md)：本條目。
+
+---
+
 ## [v20260827_v18_adr0005] - 2026-08-27 (香港時間 UTC+8)
 
 ### 🔐 本地保險箱遷移至 IndexedDB，並實裝一鍵全量備份／還原，兌現 ADR-0005

@@ -1,7 +1,7 @@
 # Architecture: RehabCounselor AI
 
 > **Status**: Living Architecture Document (SSOT for Code Structure & Technical Design)  
-> **Last Reconciled**: 2026-08-15 00:44:54 HKT
+> **Last Reconciled**: 2026-08-27 23:14 HKT (UTC+8) — full PRD↔code audit; see §7 for drift found
 
 ---
 
@@ -44,9 +44,11 @@ graph TD
    - Counselor taps microphone or holds `Space`.
    - `webkitSpeechRecognition` starts with `continuous: true` and `interimResults: true` using acoustic models (`yue-Hant-HK` / `zh-Hant-HK`).
    - Transcripts stream into the input buffer; silence buffers prevent premature cancellation.
-2. **AI Inference & Structured Gateway**:
-   - The user message, active case context, and conversational history are submitted to `generateClientReply()`.
-   - A single round-trip Gemini call with a strict `responseSchema` generates both `{ reply, coachHint }` in <1.5s.
+2. **AI Inference Gateway** ⚠️ *does not yet match [ADR-0002](adr/0002-unified-structured-gemini-schema.md)*:
+   - The user message, active case context, and conversational history are submitted to `generateClientReply()` in `geminiService.js`.
+   - **As actually built**: two *sequential* plain-text calls — `callGeminiAPI()` for `reply`, then `generateCoachHint()` for `coachHint`. There is no `responseSchema` anywhere in `geminiService.js`. Per-turn latency and token cost are therefore roughly double the intended design, and the PRD's "<1.5s" success criterion is not reachable in this shape.
+   - `generateCoachHint()` returns a hard-coded Chinese clinical sentence from its `catch`, which is displayed identically to a genuine AI hint. This violates the PRD's "no fake data" constraint.
+   - Converging on the single structured round-trip is **Milestone 5** in `Product_Roadmap.md`.
 3. **Audio Synthesis (TTS Router)**:
    - The returned `reply` is routed to `speakCantonese()`.
    - Client gender (`selectedCase.gender`) dictates voice model selection:
@@ -104,3 +106,38 @@ initApp()  →  await hydrateVault()  →  switchView("dashboard")   // first re
 **Degraded mode** — if IndexedDB is unavailable (e.g. Safari private browsing), `hydrateVault()` falls back to reading `localStorage` and sets `state.vaultMode = "localstorage-fallback"`. The Settings page states this explicitly in red, and restore is blocked with an explanatory message rather than silently showing an empty vault — per the PRD's "fail loudly, no fake data" constraint.
 
 **Backup / restore** — Settings → 資料保險箱 exports the full vault (sessions, custom cases, achievements, theory progress, non-secret settings) as `RehabCounselor_Vault_YYYY-MM-DD.json`, and restores it as an overwrite (validate → `clearAll()` → write). The Danger Zone reset offers a backup export before its two destructive confirmations, and calls `clearAll()` so reset data does not resurrect on the next boot.
+
+---
+
+## 7. Known Drift: Code vs. PRD (audited 2026-08-27 23:14 HKT)
+
+A full clause-by-clause audit of `PRD.md` v1 against `origin/main` (`1d531a5`, byte-identical to the live deployment) found the following. This section records **what the code actually does**; it is not a to-do list — sequencing lives in `Product_Roadmap.md`.
+
+### Blocking the Northstar or the SUCCESS criterion
+
+| ID | Drift | Location | PRD clause breached |
+| :--- | :--- | :--- | :--- |
+| D1 | Supervisor hint is `display:none` by default and is **re-hidden on every turn** | `app.js:3411`, `app.js:3816` | USER JOURNEY 3 "delivered alongside client dialogue"; Northstar "real-time clinical supervision" |
+| D2 | Two sequential calls, zero `responseSchema` | `geminiService.js:222-223` | HARD CONSTRAINTS (AI Gateway); SUCCESS "<1.5s" |
+| D3 | Canned supervisor hint on failure | `geminiService.js` `generateCoachHint()` catch | HARD CONSTRAINTS "no fake data" |
+| D4 | Hard-coded opening hint asserts "強烈的抗拒姿態" for **every** case regardless of its MI resistance parameter | `app.js:3412` | Northstar "authentic" |
+| D5 | Offline demo returns a generic scripted line when a case has no `roleplay_flow` — which is true of **every** AI-generated custom case — with no on-screen marking | `geminiService.js:183-186` | HARD CONSTRAINTS "no fake data" |
+| D6 | SOAP/ICF drafts live only in `state.activeSession.notes`; no `beforeunload` guard anywhere; the UI nevertheless displays a green **"已安全備份"** indicator | `app.js:3427`, `app.js:3596`, `app.js:3576-3578` | HARD CONSTRAINTS "SOAP drafts reside … in IndexedDB" |
+
+### Logged, non-blocking
+
+| ID | Drift | Note |
+| :--- | :--- | :--- |
+| D7 | Completed-session count has three parallel homes: `sessions` store (authoritative), `rehab_completed_cases_count`, `rehab_completed_case_ids` | SSOT breach; kept in sync by three adjacent assignments in `app.js:4323-4328` |
+| D8 | MiniMax diagnostics persist a masked key (first 5 + last 4 chars) and a plaintext Group ID to `localStorage` with no expiry | `app.js:3940`, `3970`, `3973`. Excluded from vault backups. |
+| D9 | Five shipped feature areas are absent from `PRD.md`: Theory Hub, Co-Learning Studio, MI 5-stage game, achievements, motivational quotes | Resolve by updating the PRD, not by removing features. PRD change requires owner approval. |
+| D10 | Case generator exposes four parameters (disability chip, age stage, ACT motivation, MI stage); the PRD names three. "Verified Cantonese dialogue characteristics" has no verification step. | Superset, harmless |
+| D11 | `sessions` has no index; ordering relies on `b.id.localeCompare(a.id)` being correct only because `"session_" + Date.now()` is fixed-width | Correct today, fragile by construction |
+| D12 | ICF sandbox lives in the case catalog, not in the interview view; it does not assist SOAP drafting | USER JOURNEY 4 "assisted by" unfulfilled |
+
+### Confirmed sound
+
+- **Access model matches the PRD exactly** — single-user, local-first, no accounts, no server-side gate to bypass, no multi-tenant data. Nothing added beyond the PRD, nothing missing from it.
+- **Nothing in OUT OF SCOPE is violated.** The Co-Learning Studio reads `MOCK_CO_LEARNING_CASES[0]` entirely locally — no WebSocket, WebRTC, or backend — so it is not a "multi-counselor synchronous conference room".
+- **Storage schema is clean**: three object stores (`sessions`, `custom_cases`, `app_meta`), all in use, no orphan stores. `DB_VERSION` is still 1 and `onupgradeneeded` only creates absent stores, so no destructive migration has ever run. The ADR-0005 migration verifies every source id landed in IndexedDB *before* deleting the `localStorage` copies — verified by live browser test.
+- `custom_cases` carries a latent orphan risk: `persistCustomCases()` only `put`s, never `delete`s. No delete UI exists today, so there are no orphans — but adding one without a matching delete path would strand records.

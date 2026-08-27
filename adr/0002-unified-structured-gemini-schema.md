@@ -1,8 +1,10 @@
 # ADR-0002: Single-Roundtrip Structured Schema for Client Reply & Supervisor Hint
 
-* **Status**: Accepted
+* **Status**: Accepted — **not implemented in the shipped code** (see Implementation Note)
 * **Date**: 2026-08-15
 * **Deciders**: Antigravity & Lead Counsel
+
+> **Implementation Note (2026-08-27 23:14 HKT audit)**: This decision is *not* reflected in `origin/main`. `geminiService.js:222-223` still issues two sequential plain-text calls (`callGeminiAPI()` then `generateCoachHint()`), and the file contains no `responseSchema` at all. The consequence the ADR set out to remove — doubled latency and token cost — is still present, and the PRD's "<1.5s" success criterion is unreachable in this shape. A conforming implementation exists on the abandoned `rollback` branch as commit `e06789d` but was never merged. Convergence is scheduled as **Milestone 5** in `Product_Roadmap.md`. The decision text below is left exactly as it was made.
 
 ## Context
 During live counseling simulations, counselors need immediate feedback from the simulated client and a simultaneous supervisory hint. Executing two sequential API calls created a 3.5–5.5s delay, breaking natural conversational immersion.
