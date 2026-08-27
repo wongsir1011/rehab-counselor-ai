@@ -98,7 +98,7 @@
 *   **同步修復**：在重置事件監聽器中追加了 `state.selectedVoiceName = ""` 的記憶體狀態復位，使其與緩存層 100% 完美對齊。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js):
+*   [app.js](app.js):
     *   重構 `exportSessionReport` 支持第二參數 `historicalSession` 與安全 Fallback 邏輯。
     *   在 `showSessionDetailPopup` 的匯出點擊事件中精確傳入 `(session.report, session)`。
     *   將 `speakCantonese` 的 `cleanup` 邏輯安全包裹在 `state.activeUtterance === utterance` 防護網內。
@@ -123,13 +123,13 @@
     *   驗收了平台內置的 `exportSessionReport()` 導出引擎。支持在評估報告或歷史全息彈窗中一鍵導出為 Markdown (`.md`) 下載檔案，包含個案背景、SOAP 日誌、ICF 臨床評估及完整的諮商對白歷史紀錄。同工已成功下載並開啟驗證報告，功能運作完美。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js):
+*   [app.js](app.js):
     *   在 `AudioSynth` 中實裝了 `playWarning()` 警告警報與 `playSigh()` 嘆氣合成器。
     *   重構 `renderSettings()` 追加危險區域進度重設警告區塊與雙重安全鎖點擊監聽器，配合 `localStorage` 清理與自癒 Toast。
     *   重構 `speakCantonese()` 引入基於案主情緒狀態的 rate/pitch 聲學調製，並增加省略號判斷觸發 `playSigh()` 嘆氣延時播放。
     *   升級頂部模組導入參數為 `v20260601_v11`。
-*   [index.css](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.css): 追加 Phase 11 全套 CSS 樣式系統（`.btn-reset` 危險區按鈕及 Hover 霓虹流光）。
-*   [index.html](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.html): 升級應用程式與樣式表的快取破除參數至 `v20260601_v11`。
+*   [index.css](index.css): 追加 Phase 11 全套 CSS 樣式系統（`.btn-reset` 危險區按鈕及 Hover 霓虹流光）。
+*   [index.html](index.html): 升級應用程式與樣式表的快取破除參數至 `v20260601_v11`。
 
 ---
 
@@ -167,7 +167,7 @@
     *   幫助文本完全重寫：以結構化格式（問題根因 → 解決方法 1/2/3）清晰呈現三級修復方案（切換語言代碼 → 無痕視窗 → 修改 Google 賬號語言），取代舊版零散說明。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js):
+*   [app.js](app.js):
     *   修改 `state.recognitionLang` 預設值：Chrome 由 `zh-HK` 改為 `yue-Hant-HK`。
     *   在 `initApp()` 中實裝 Chrome 用戶 `zh-HK → yue-Hant-HK` 自動遷移邏輯。
     *   在 `startRoleplaySession()` 的 DOM 模板中注入 Chrome 診斷橫幅及一鍵修復按鈕事件監聽器。
@@ -196,15 +196,15 @@
     *   在 `stopRecording()`、會話結束、或切換視圖時調用 `window.speechSynthesis.cancel()` 與 `clearAllSpeakingStates()`，徹底清空背景語音與發光狀態。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js):
+*   [app.js](app.js):
     *   在全域 `state` 中追加 `isSpeechMuted` 控制狀態與 `activeUtterance` 競態防護物件。
     *   重構 `startRoleplaySession()`。將靜態語音標籤升級為交互式 `#rp-speech-toggle-btn` 並綁定 click 監聽器。在初始氣泡渲染時同步觸發廣東話朗讀。
     *   重構 `renderChatBubble()`。對案主氣泡動態植入 `.bubble-replay-btn` 重播按鈕並返回 bubble DOM 實體。
     *   重構 `submitMessageToAI()`。捕獲新氣泡實體並傳入 `speakCantonese()` 觸發朗讀。
     *   重構 `stopRecording()` 與 `speakCantonese()`。實裝 `clearAllSpeakingStates()` 與 `activeUtterance` 標記防範異步事件競態。
     *   升級頂部模組導入參數為 `v20260530_v8`。
-*   [index.css](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.css): 追加 Phase 7 全套 CSS 樣式系統（`.speech-control-toggle` 控制開關、`.bubble-replay-btn` 重播按鈕、`.chat-bubble.bubble-ai.is-speaking` 漸變呼吸流動邊框及 `@keyframes` 動效、`.active-rp-avatar.speaking-pulse` 脈波光學呼吸及 `@keyframes`）。
-*   [index.html](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.html): 升級應用程式與樣式表的快取破除參數至 `v20260530_v8`。
+*   [index.css](index.css): 追加 Phase 7 全套 CSS 樣式系統（`.speech-control-toggle` 控制開關、`.bubble-replay-btn` 重播按鈕、`.chat-bubble.bubble-ai.is-speaking` 漸變呼吸流動邊框及 `@keyframes` 動效、`.active-rp-avatar.speaking-pulse` 脈波光學呼吸及 `@keyframes`）。
+*   [index.html](index.html): 升級應用程式與樣式表的快取破除參數至 `v20260530_v8`。
 
 ---
 
@@ -236,8 +236,8 @@
     *   *修正*：將選擇器重構為正確的 ID 綁定 `document.getElementById("tab-btn-" + details.actionTab)`。經修復後，快捷跳轉機制運作完全流暢，徹底解決了無聲失效隱患。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js): 在 `renderRadarRecommendation()` 的快捷跳轉與事件監聽器中，修復無聲失效的選擇器 bug。
-*   [index.css](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.css): 追加 Phase 5 全套 Projector 投影、投票水平條、雷達圖 2.0 Hover 動效及 LCD 建議面板 CSS。
+*   [app.js](app.js): 在 `renderRadarRecommendation()` 的快捷跳轉與事件監聽器中，修復無聲失效的選擇器 bug。
+*   [index.css](index.css): 追加 Phase 5 全套 Projector 投影、投票水平條、雷達圖 2.0 Hover 動效及 LCD 建議面板 CSS。
 
 ---
 
@@ -263,13 +263,13 @@
     *   更新 `index.html` 中的 CSS 與 JS 快取破除參數，並同步更新 `app.js` 的頂部 mockData 及 geminiService 模組導入網址至 `v20260530_v5`，確保客戶端即時渲染最新代碼。
 
 ### 📦 變更檔案 (Files Changed)
-*   [index.html](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.html): 升級快取破除參數至 `v20260530_v5`。
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js):
+*   [index.html](index.html): 升級快取破除參數至 `v20260530_v5`。
+*   [app.js](app.js):
     *   更新頂部 mockData 及 geminiService 導入參數至 `v20260530_v5`。
     *   在 `startRoleplaySession()` 中重構標籤與指示器 DOM 結構，追加 active 點擊防護及 `translateX` 滑塊控制。
     *   在 `notesBox` 增加 `input` 監聽器並對接 debounced AI 自動存檔發光指示器。
     *   在 `submitMessageToAI` 增加案主頭像 `#rp-active-avatar` 發光呼吸 class 狀態切換。
-*   [index.css](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.css): 追加 Phase 4 全套 CSS 樣式及動畫定義（`.notes-tab-highlighter`, `.notes-save-indicator`, `@keyframes springy-bubble`, `@keyframes mic-pulsing-glow`, `@keyframes avatar-pulse-glow` 等）。
+*   [index.css](index.css): 追加 Phase 4 全套 CSS 樣式及動畫定義（`.notes-tab-highlighter`, `.notes-save-indicator`, `@keyframes springy-bubble`, `@keyframes mic-pulsing-glow`, `@keyframes avatar-pulse-glow` 等）。
 
 ---
 
@@ -281,7 +281,7 @@
     *   *修正*：重構了寫入與進入輔導按鈕的事件監聽器，新增了 `!state.cases.some(c => c.id === geminiResult.id)` 唯一性檢查。只有在個案 ID 不存在於全局狀態時才執行 `unshift`，徹底消除了重複寫入與平行狀態隱患。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js): 在自定義個案生成成功後的 `writeBtn` 和 `enterBtn` 的點擊事件中，實裝唯一性防重複寫入安全補丁。
+*   [app.js](app.js): 在自定義個案生成成功後的 `writeBtn` 和 `enterBtn` 的點擊事件中，實裝唯一性防重複寫入安全補丁。
 
 ---
 
@@ -303,11 +303,11 @@
 *   **SVG 趨勢折線圖生成**：利用原生 SVG 動態渲染出優美的發光霓虹趨勢折線，支持多點數據的自動比例縮放，帶給同工明確的成長軌跡。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js):
+*   [app.js](app.js):
     *   更新頂部 `mockData` 和 `geminiService` 的導入 URL 至 `v20260525_v4`，並導入 `generateSoapSuggestions`。
     *   在 `startRoleplaySession()` 的 DOM 模板中注入 `#voice-fft-canvas` 與 `.soap-assistant-drawer` 的 HTML，並在挂載後執行 `initSoapAssistantDrawer()`。
     *   在 `renderAnalytics()` 中實裝基於 SVG 曲線的縱向能力趨勢分析圖繪製邏輯。
-*   [index.css](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.css): 追加 Phase 6 全套 CSS 樣式系統（`.soap-assistant-drawer` 側邊滑動抽屜、`#voice-fft-canvas` 頻譜儀樣式、SVG 曲線發光陰影等）。
+*   [index.css](index.css): 追加 Phase 6 全套 CSS 樣式系統（`.soap-assistant-drawer` 側邊滑動抽屜、`#voice-fft-canvas` 頻譜儀樣式、SVG 曲線發光陰影等）。
 
 ---
 
@@ -333,7 +333,7 @@
     *   在音效調用中加入鎖定與單例防護，避免快速雙擊卡牌時產生刺耳破音。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js): 重構為全語系動態模板渲染，新增 `AudioSynth` 發聲引擎，實裝會話存檔與全息彈窗，對接 GeminiQuiz 服務。
+*   [app.js](app.js): 重構為全語系動態模板渲染，新增 `AudioSynth` 發聲引擎，實裝會話存檔與全息彈窗，對接 GeminiQuiz 服務。
 
 ---
 
@@ -351,11 +351,11 @@
     *   *修正*：將 `category` 屬性直接靜態化寫入 `mockData.js` 的 `MOCK_CASES` 成員中，移除了 `app.js` 的動態突變迴圈，維護數據不可變性。
 
 ### 📦 變更檔案 (Files Changed)
-*   [geminiService.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/geminiService.js): 重構 `parseFlexibleJson`，新增 `escapeRawControlCharsInJsonStrings` 控制字元轉義機制，優化單行註解過濾。
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js): 重構 `renderCaseArena`、`renderCaseCatalog`、`renderCaseGenerator`。更新導入的路徑參數，提升快取破除機制至 `v20260524_v1`。
-*   [index.css](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.css): 新增 Phase 3 全套科幻儀表板 CSS 樣式系統（`.dossier-search-wrapper`、`.dossier-card`、`.synthesis-terminal`、`.synthesis-loading-hud` 等），追加 `[data-theme="light"]` 覆寫相容樣式。
-*   [mockData.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/mockData.js): 為 `MOCK_CASES` 補全靜態 `category` 屬性以維護 SSOT 規範。
-*   [index.html](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.html): 升級應用程序與樣式表的快取破除參數為 `v20260524_v1`。
+*   [geminiService.js](geminiService.js): 重構 `parseFlexibleJson`，新增 `escapeRawControlCharsInJsonStrings` 控制字元轉義機制，優化單行註解過濾。
+*   [app.js](app.js): 重構 `renderCaseArena`、`renderCaseCatalog`、`renderCaseGenerator`。更新導入的路徑參數，提升快取破除機制至 `v20260524_v1`。
+*   [index.css](index.css): 新增 Phase 3 全套科幻儀表板 CSS 樣式系統（`.dossier-search-wrapper`、`.dossier-card`、`.synthesis-terminal`、`.synthesis-loading-hud` 等），追加 `[data-theme="light"]` 覆寫相容樣式。
+*   [mockData.js](mockData.js): 為 `MOCK_CASES` 補全靜態 `category` 屬性以維護 SSOT 規範。
+*   [index.html](index.html): 升級應用程序與樣式表的快取破除參數為 `v20260524_v1`。
 
 ---
 
@@ -401,7 +401,7 @@
     *   每次 Confetti 噴發產生的粒子 div，綁定自動銷毀計時器 `setTimeout(() => p.remove(), 1200)`，與 CSS 漸顯動畫完全對齊，確保 DOM 樹節點被徹底回收。
 
 ### 📦 變更檔案 (Files Changed)
-*   [app.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/app.js): 重構 `renderTheoryHub`、`renderACTTab`、`renderMITab`、`renderICFTab`，新增巢狀 sub-tabs 操控、3D 閃卡、解離沙盒、MI 5關卡遊戲、Confetti 噴射器與 ICF 實戰沙盒。修復 `renderCaseArena` 語法殘留，實裝安全定時器清除。
-*   [index.css](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.css): 追加 Phase 2 全套 CSS 設計系統（`.theory-sub-tab-group`, `.card-3d-wrapper`, `.card-front`, `.card-back`, `.defusion-container`, `.particle-dot`, `@keyframes spring-snap`, `@keyframes shake`, `.shake-warning`）。
-*   [index.html](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/index.html): 更新快取破除參數為 `v20260523_v6`。
-*   [mockData.js](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/mockData.js): 保持 `MOCK_THEORY_DATA.mi.oars_game` 的 5 關卡案例完整性，維持 SSOT。
+*   [app.js](app.js): 重構 `renderTheoryHub`、`renderACTTab`、`renderMITab`、`renderICFTab`，新增巢狀 sub-tabs 操控、3D 閃卡、解離沙盒、MI 5關卡遊戲、Confetti 噴射器與 ICF 實戰沙盒。修復 `renderCaseArena` 語法殘留，實裝安全定時器清除。
+*   [index.css](index.css): 追加 Phase 2 全套 CSS 設計系統（`.theory-sub-tab-group`, `.card-3d-wrapper`, `.card-front`, `.card-back`, `.defusion-container`, `.particle-dot`, `@keyframes spring-snap`, `@keyframes shake`, `.shake-warning`）。
+*   [index.html](index.html): 更新快取破除參數為 `v20260523_v6`。
+*   [mockData.js](mockData.js): 保持 `MOCK_THEORY_DATA.mi.oars_game` 的 5 關卡案例完整性，維持 SSOT。
