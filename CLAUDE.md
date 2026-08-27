@@ -19,7 +19,11 @@ Format is `vYYYYMMDD_vNN_shortname` (e.g. `v20260827_v18_adr0005`). Forgetting t
 
 **2. Most of `src/` is dead code.** Only `src/utils/db.js` is imported (by `app.js`, for the IndexedDB vault). The other 18 files (`src/main.js`, `src/views/*`, `src/core/*`, `src/components/*`, …) are an abandoned modularization attempt — nothing imports them, though Vercel still serves them. Do not assume a file under `src/` is live; grep for its import first. Their fate is an open backlog decision.
 
-**3. The SSOT living docs must be updated with the code.** `CHANGELOG.md`, `ARCHITECTURE.md`, `Product_Roadmap.md`, and the relevant `adr/*.md` are treated as the authoritative record. A code change without the matching doc update is an incomplete change. These docs have drifted badly before; `Product_Roadmap.md` is currently still stale for Milestones 2–3 (marked "Next"/"Planned" but in fact shipped) pending a decision.
+**3. The SSOT living docs must be updated with the code.** Authority is split four ways per [ADR-0006](adr/0006-four-pillar-ssot-documentation.md): this file governs agent behaviour, `PRD.md` governs product intent, the code — **described by** `ARCHITECTURE.md` — governs actual behaviour, and `CHANGELOG.md` governs history. A code change without the matching doc update is an incomplete change.
+
+`ARCHITECTURE.md` describes the code **as it is, not as intended** — where they differ, record the drift in its §7 rather than describing the target design. That rule exists because §3 claimed a single structured AI round-trip that the code never had, and the claim survived unchallenged for weeks.
+
+`PRD.md` is at **v3** (approved 2026-08-27), and now covers the Theory Hub, group projector study, MI staged drills, and achievements. It deliberately **omits motivational quotes** — interface garnish is not product intent. PRD changes need owner approval and the diff shown first; never overwrite it silently, and never delete features to make the code match it.
 
 **4. ADRs are immutable history.** `adr/*.md` records the decision as made, including its `Deciders` field. Add an Implementation Note or a new ADR; never rewrite a past decision to match present reality.
 

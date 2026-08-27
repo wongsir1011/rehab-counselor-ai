@@ -10,7 +10,7 @@ export const GEMINI_MODELS = {
 /**
  * 核心方法：發送請求至 Gemini API REST 端點
  */
-async function callGeminiAPI(apiKey, model, systemInstruction, prompt, history = [], responseJson = false) {
+async function callGeminiAPI(apiKey, model, systemInstruction, prompt, history = [], responseJson = false, responseSchema = null) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   
   // 建立對話格式
@@ -40,7 +40,9 @@ async function callGeminiAPI(apiKey, model, systemInstruction, prompt, history =
     generationConfig: {
       temperature: 0.7,
       maxOutputTokens: 4096,
-      ...(responseJson ? { responseMimeType: "application/json" } : {})
+      // 傳入 responseSchema 時一併強制 JSON MIME；responseJson 保留給既有呼叫點，行為不變。
+      ...((responseJson || responseSchema) ? { responseMimeType: "application/json" } : {}),
+      ...(responseSchema ? { responseSchema } : {})
     }
   };
 
@@ -190,7 +192,26 @@ export async function generateClientReply(apiKey, model, caseDetails, history, u
     });
   }
 
+  // 單次往返雙角色 schema（ADR-0002 / PRD v3 AI Gateway）。
+  // propertyOrdering 令模型先生成 reply、再據以生成 coachHint，保留督導須分析案主回應的邏輯依賴；
+  // 同一順序要求另以文字寫入 systemInstruction，不單靠此欄位。
+  const responseSchema = {
+    type: "OBJECT",
+    properties: {
+      reply: { type: "STRING" },
+      coachHint: { type: "STRING" }
+    },
+    required: ["reply", "coachHint"],
+    propertyOrdering: ["reply", "coachHint"]
+  };
+
   const systemInstruction = `
+你要在同一次回應中扮演兩個彼此獨立的角色，並輸出一個 JSON 物件。
+必須先完成角色 A 的對白，再根據該對白進行角色 B 的分析。
+
+════════════════════════════════════════
+【角色 A：案主】→ 輸出至 JSON 欄位 "reply"
+════════════════════════════════════════
 你是一位正在接受香港復康會職業復康輔導的案主。
 你的背景資料如下：
 - 姓名：${caseDetails.name}
@@ -209,19 +230,44 @@ export async function generateClientReply(apiKey, model, caseDetails, history, u
    - 若User使用「認知解離（ACT Defusion）」或「價值澄清（ACT Values）」，你會開始思考自己人生更重要的價值，而不是死盯著身體的殘疾。
    - 若User使用強行說教、教訓、指責、不耐煩的語氣，你必須變得更加生氣、冷淡或完全退縮。
 5. 每次回答長度請控制在 80-150 字左右，表現出真實對話的節奏。
+6. 【"reply" 欄位的嚴格限制】：此欄位會被直接送入語音合成朗讀給同工聽。因此只可以是案主口中說出的廣東話對白本身，絕對不可包含任何旁白、動作描述、括號註解、角色標籤、臨床分析或給輔導員的建議。
+
+════════════════════════════════════════
+【角色 B：臨床督導】→ 輸出至 JSON 欄位 "coachHint"
+════════════════════════════════════════
+你同時是一位資深的臨床督導（Clinical Supervisor），精通：
+1. 動機式訪談法 (MI) - OARS 技巧、改變性談話（Change Talk）激發。
+2. 接納承諾療法 (ACT) - 心理彈性六角模型（接納、認知解離、關注當下、以己為景、價值澄清、承諾行動）。
+3. 國際功能、殘疾和健康分類 (ICF) - 生物心理社會（Biopsychosocial）全人評估。
+
+你的任務是客觀、精準、溫和地評估輔導員剛才的發言，並為其下一步行動提供具體的臨床指引。
+請遵守以下輸出準則：
+1. 必須完全使用「繁體中文（香港習慣）」撰寫。
+2. 指出輔導員剛才的發言運用了什麼技巧（如：同理心做得好、有效引導了價值澄清、或是陷入了說教糾正反射）。
+3. 指出案主在你剛才於 "reply" 寫下的回應中，隱含了哪些臨床訊號（例如：出現了改變性談話 Change Talk、或是呈現重度經驗性逃避 Experiential Avoidance）。
+4. 給出下一句對話的「實戰建議回應方向」或引導提問，並標明這屬於 ACT 還是 MI 的哪一個維度。
+5. 保持精簡，總字數控制在 150 字以內，使用小標題或列點方式，使其在側欄易於閱讀。
+6. 【"coachHint" 欄位的嚴格限制】：此欄位是寫給輔導員看的督導分析，絕對不可使用案主的口吻或人稱，也不可重複案主的對白。
 `;
 
   const prompt = `輔導員剛才對你說了這句話：
 「${userMessage}」
 
-請以案主的身份，根據當下的心理防衛程度與對話脈絡，給出你最真實的廣東話回應。`;
+請輸出 JSON 物件：先以案主身份，根據當下的心理防衛程度與對話脈絡，於 "reply" 給出最真實的廣東話回應；再以臨床督導身份，針對輔導員這句發言與你剛寫下的案主回應，於 "coachHint" 給出簡短督導分析與下一步建議。`;
 
   try {
-    const reply = await callGeminiAPI(apiKey, model, systemInstruction, prompt, history);
-    
-    // 生成完案主回答後，立刻為輔導員生成 AI 督導提示 (AI Coach Hint)
-    const coachHint = await generateCoachHint(apiKey, model, caseDetails, history, userMessage, reply);
-    
+    const rawText = await callGeminiAPI(apiKey, model, systemInstruction, prompt, history, false, responseSchema);
+    const parsed = parseFlexibleJson(rawText);
+
+    // 嚴格驗證：任一欄位缺失或空白即大聲失敗，絕不以罐頭文字填補（PRD: no fake data）。
+    const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : "";
+    const coachHint = typeof parsed?.coachHint === "string" ? parsed.coachHint.trim() : "";
+
+    if (!reply || !coachHint) {
+      const missing = [!reply && "reply", !coachHint && "coachHint"].filter(Boolean).join("、");
+      throw new Error(`AI 回應結構不完整，缺少或空白欄位：${missing}。原始回應內容：\n${rawText}`);
+    }
+
     return { reply, coachHint };
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -230,40 +276,7 @@ export async function generateClientReply(apiKey, model, caseDetails, history, u
 }
 
 /**
- * 2. AI 督導提示生成 (AI Coach Hint)
- */
-async function generateCoachHint(apiKey, model, caseDetails, history, userMessage, clientReply) {
-  const systemInstruction = `
-你是一位資深的臨床督導（Clinical Supervisor），精通：
-1. 動機式訪談法 (MI) - OARS 技巧、改變性談話（Change Talk）激發。
-2. 接納承諾療法 (ACT) - 心理彈性六角模型（接納、認知解離、關注當下、以己為景、價值澄清、承諾行動）。
-3. 國際功能、殘疾和健康分類 (ICF) - 生物心理社會（Biopsychosocial）全人評估。
-
-你的任務是客觀、精準、溫和地評估輔導員（User）剛才的發言，並為其下一步行動提供具體的臨床指引。
-請遵守以下輸出準則：
-1. 必須完全使用「繁體中文（香港習慣）」撰寫。
-2. 指出輔導員剛才的發言運用了什麼技巧（如：同理心做得好、有效引導了價值澄清、或是陷入了說教糾正反射）。
-3. 指出案主剛才的回應中，隱含了哪些臨床訊號（例如：出現了改變性談話 Change Talk、或是呈現重度經驗性逃避 Experiential Avoidance）。
-4. 給出下一句對話的「實戰建議回應方向」或引導提問，並標明這屬於 ACT 還是 MI 的哪一個維度。
-5. 保持精簡，總字數控制在 150 字以內，使用小標題或列點方式，使其在側欄易於閱讀。
-`;
-
-  const prompt = `
-個案背景：${caseDetails.name}，${caseDetails.health_condition}。
-輔導員發言：${userMessage}
-案主廣東話回應：${clientReply}
-
-請對輔導員剛才的發言進行簡短臨床督導，並為其下一句回應提供具體微小提示：`;
-
-  try {
-    return await callGeminiAPI(apiKey, model, systemInstruction, prompt);
-  } catch (error) {
-    return "【AI 督導提示暫時無法加載】：建議同工此時繼續保持 MI 的「反映式傾聽」，先接納案主的情緒，再尋找他的核心價值觀進行引導。";
-  }
-}
-
-/**
- * 3. AI 智能個案產生器
+ * 2. AI 智能個案產生器
  */
 export async function generateCustomCase(apiKey, model, options) {
   if (!apiKey) {
@@ -328,7 +341,7 @@ export async function generateCustomCase(apiKey, model, options) {
 }
 
 /**
- * 4. AI 輔導總結與雷達圖評分生成
+ * 3. AI 輔導總結與雷達圖評分生成
  */
 export async function generateSessionReport(apiKey, model, caseDetails, history) {
   if (!apiKey) {
@@ -393,7 +406,7 @@ ${historyText}
 }
 
 /**
- * 5. AI Co-Learning Studio: 動機/接納療法研討題目生成
+ * 4. AI Co-Learning Studio: 動機/接納療法研討題目生成
  */
 export async function generateCustomQuiz(apiKey, model, dialogueSegment) {
   if (!apiKey) {
@@ -446,7 +459,7 @@ export async function generateCustomQuiz(apiKey, model, dialogueSegment) {
 }
 
 /**
- * 6. AI 輔導室：動態 SOAP 建議起草
+ * 5. AI 輔導室：動態 SOAP 建議起草
  */
 export async function generateSoapSuggestions(apiKey, model, dialogueHistory) {
   if (!apiKey) {

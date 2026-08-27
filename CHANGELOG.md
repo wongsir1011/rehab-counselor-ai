@@ -4,6 +4,162 @@
 
 ---
 
+## [v20260828_v22_m5_review] - 2026-08-28 02:26 (香港時間 UTC+8)
+
+本次為同儕審查記錄提交，**不涉及任何執行碼變更**。審查對象為 `24e8a85`（Milestone 5），全程以實際執行為準，未修改程式碼。
+
+### 🔴 發現 Milestone 5 自身引入的回歸（D15）
+*   **督導干預指令在失敗回合後靜默遺失**。M5 的失敗回滾（`plan/05` §3.6）造成：`app.js:3762` 在 API 呼叫**之前**清空 `state.activeSession.promptModifiers`，而回滾又把承載該指令文字的孤立 history 項目 pop 掉，指令因而徹底消失。同工按下「⚠️ 突發抗拒」→ 該回合失敗 → 重試 → 干預不再生效，**畫面上無任何提示**。
+*   **A/B 實測證據**：把 `063acdc`（M5 之前）取出於另一埠（8766）啟動，以完全相同的 fetch 攔截手法比對整個請求主體 —— 舊版第 2 次請求**仍含** `臨床督導即時注入指令`（靠孤立 history 殘留），M5 版**已遺失**。
+*   第一次量測抓錯位置（只看最後一段 prompt，而該指令在舊版是留在 `contents` 的歷史項目內），修正方法後重測才得到上述結果。
+*   違反專案編碼原則「發生錯誤時向使用者呈現真實錯誤，不得假裝成功」。**修正前 Milestone 5 不算交付**，`Product_Roadmap.md` 狀態已改為「同儕審查發現回歸待修 ⚠️」。
+
+### 🟡 已記錄、不阻塞的發現
+*   **D16 — 督導面板以 `innerHTML` 渲染模型輸出**（`app.js:3810`）。實測 `<img src=x onerror=…>` **確實執行**（`window.__XSS` 被設定）。案主對白是安全的（`renderChatBubble` 使用 `textContent`），僅此一處。**屬既存問題，M5 未加劇** —— 舊版同樣賦值 `innerHTML`，且 `display:none` 不阻止 `onerror` 觸發。惟存在一條具體可達鏈：個案「基因碼」導入（`synthesis-import-btn`）接受來自他人的任意 base64 字串，可挾帶提示注入，而 `localStorage` 內存著 API 金鑰。
+*   **D17 — Phase 13 督導即時干預功能不在 PRD v3 內**。`promptModifiers`、四顆指令按鈕與 `rp-intervention-send-btn` 是完整功能，但 PRD 全文 grep `intervention|inject|干預|directive` 零命中。此為 2026-08-27 23:14 審計的漏列。**依 SSOT 規則不修改 PRD 迎合實作**，僅記錄偏差，待擁有者決定。
+*   **D5 補充實測數據**：七個內建個案的 `roleplay_flow` 僅 1–3 回合，`case_02`／`case_mental_cheng`／`case_asd_kahou`／`case_sensory_meiling` **第 2 回合起**即落入通用假對白。M5 加入的面板層「示範劇本」標記涵蓋整個離線模式，但對話氣泡本身仍無標示（屬 Milestone 6）。
+
+### ✅ 以實際執行確認無恙的項目
+*   **上一輪流程在目前版本仍可用**：`check_syntax.py` 全綠；stub 主路徑 `callCount === 1`；瀏覽器首回合提示無需點擊即可讀；切換與標籤同步；失敗回合回填與孤立氣泡移除。
+*   **新增回歸測試**：以 stub 逐一呼叫 `generateCustomCase`／`generateSessionReport`／`generateCustomQuiz`／`generateSoapSuggestions`，四者的 `generationConfig.responseSchema` 皆為 `undefined`，證明 `callGeminiAPI` 第 7 個參數未波及既有呼叫點。
+*   **邊界情況實跑**：連續兩次失敗無氣泡累積（7 → 7 → 7）；等待期間打字後失敗不覆蓋新輸入；手動收合後新回合被強制展開（符合 PRD「visible by default on arrival」，屬預期行為）。
+*   **接縫**：`setCoachPanelVisible()` 為 top-level 宣告，三個呼叫點均在其後；`clientShortName` 全檔零殘留；失敗回滾的氣泡守衛 `classList.contains("bubble-user")` 與 `renderChatBubble` 的 `bubble-${sender}` 命名相符。
+*   **資料表**：本輪與 M5 皆未動 `src/utils/db.js`，`DB_VERSION` 維持 1，無 schema 變更、無 migration、無刪表重建。
+*   **存取模型**：無變動，仍為單人本地優先、無帳號、無伺服器權限關卡，恰如 PRD v3。
+
+### ⚠️ 本輪未重新測試（誠實列出）
+MiniMax TTS 雙引擎與性別音色綁定、連續廣東話 STT（需麥克風）、保險箱遷移／備份／還原、面談結束→雷達報告→Markdown 匯出、ICF 沙盒、理論學習 Hub、MI 五關卡、小組研習、學習分析、成就徽章，以及**真實 Gemini 金鑰端對端**（`propertyOrdering` 是否被模型接受仍未知）。
+
+### 📐 設計上的已知極限（非缺陷，供日後查閱）
+角色 A 對 `reply` 的「禁止旁白、動作描述、括號註解」是 **prompt 層約束，無程式層強制**。`responseSchema` 只保證欄位存在與型別，管不到內容；模型若不遵守，含旁白的文字會直接送入 TTS 朗讀。
+
+### 📦 變更檔案 (Files Changed)
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§7 新增「Findings from the Milestone 5 peer review」小節（D15／D16／D17），D5 補上實測的劇本長度數據。
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 5 狀態改為「已建置，同儕審查發現回歸待修 ⚠️」，並註明修正前不算交付。
+*   [plan/05-synchronous-dual-track-response.md](plan/05-synchronous-dual-track-response.md)：新增第 8 節同儕審查結果，含 A/B 對照表與未測清單。
+*   [Product_Roadmap.md](Product_Roadmap.md)：另修正一處文件矛盾 —— Milestone 2 原標記「Half Delivered ⚠️／同步性未兌現」，但該半邊已由 M5 建置完成，改標記為「Completed ✅」並註明同步性由 M5 補齊。
+*   [CHANGELOG.md](CHANGELOG.md)：本條目。
+
+**未更動**：`PRD.md`（產品意圖 SSOT，偏差記於本檔而非反向修改 PRD）、`DECISIONS.md` 與 `adr/`（本輪為審查，未作出新的架構決策，不虛構 ADR）。
+
+---
+
+## [v20260828_v21_m5] - 2026-08-27 23:43 (香港時間 UTC+8)
+
+### ⚡ Milestone 5 交付：同一口氣的雙軌回應，兌現 ADR-0002
+依 [plan/05-synchronous-dual-track-response.md](plan/05-synchronous-dual-track-response.md) 建置。
+
+*   **單次結構化往返 (Single Structured Round-Trip)**：
+    *   `callGeminiAPI()` 新增第 7 個參數 `responseSchema`；提供時於 `generationConfig` 同時注入 `responseMimeType: "application/json"` 與 schema。既有 `responseJson` 參數與其四個呼叫點完全不動，無回歸風險。
+    *   `generateClientReply()` 由**兩次循序純文字呼叫**改為**單次呼叫**，schema 為 `{ reply, coachHint }` 兩個 STRING 欄位，`required` 兩者、`propertyOrdering` 先 `reply` 後 `coachHint`，保留督導須分析案主回應的邏輯依賴。同一順序要求另以文字寫入 `systemInstruction`，不單靠該欄位。
+    *   `systemInstruction` 以分隔區塊定義雙重角色：角色 A 案主（`reply` 僅限廣東話對白，明文禁止旁白、動作描述、括號註解、角色標籤與臨床分析 —— 該欄位直接送入 TTS 朗讀）；角色 B 臨床督導（`coachHint` 明文禁止使用案主口吻或重複案主對白）。
+    *   解析後嚴格驗證兩欄位皆存在、為字串、trim 後非空；任一不符即拋出真實錯誤並附原始回應內容。
+*   **刪除罐頭督導提示 (Fail Loudly, No Fake Data)**：`generateCoachHint()` 整支函式連同其 catch 回傳的寫死臨床建議字串（「【AI 督導提示暫時無法加載】…」）移除。該降級路徑會把預先寫死的通用臨床建議偽裝成 AI 督導分析，且在畫面上與真實分析完全無法分辨。
+*   **督導提示預設可見 (PRD v3: visible by default on arrival)**：
+    *   移除面板的 `display:none` 初始樣式，並將每回合結束時的 `display = "none"` 改為可見。**此前每一回合都主動把提示重新藏起，同工每說一句話都要再點一次按鈕** —— 產品核心價值長期被藏在一顆重複按鈕之後。
+    *   新增 `setCoachPanelVisible()` 作為面板顯示狀態的單一控制點，令面板與切換按鈕的圖示／文字永遠一致。切換按鈕保留 —— PRD 允許 dismissible，只禁止預設隱藏。
+*   **移除寫死的開場督導提示**：原文對**所有**個案一律宣稱「案主剛進來，擺出強烈的抗拒姿態」，不論該個案的 MI 抗拒參數為何，屬未經任何 AI 分析的偽臨床判斷。改為不含任何臨床斷言的中性空狀態。此項為 M5 必要之舉：面板改為常駐可見後，該段文字會成為同工開啟面談後看到的第一段、且持續可見的內容。連帶移除因此失去用途的 `clientShortName` 變數。
+*   **失敗回合乾淨回滾**：原本失敗時只彈出 alert，但使用者訊息已寫入 `state.activeSession.history` 且氣泡已渲染，形成**無配對的孤立 user 回合**，會污染下一回合送出的對話歷史，並使離線模式的 `step = history.length / 2` 計算錯位。現改為移除該筆記錄與其氣泡（僅在最後節點確實為 `.bubble-user` 時才移除）、**把原文放回輸入框**供直接重試，面板顯示中性訊息且不含任何臨床內容，並保留 alert 呈現真實錯誤。
+*   **離線示範的面板標示**：無金鑰時督導面板顯示常駐「示範劇本」標記，防止 M5 的常駐可見把示範內容提升為持續可見的偽督導分析。逐句標示與「無劇本個案不得試玩」仍屬 Milestone 6。
+*   **快取破除**：`index.html` 的 `app.js?v=` 與 `app.js` 的 `geminiService.js?v=` 一併更新至 `v20260828_v21_m5`（後者自 `v20260724_v13_1` 起未曾更新）。
+
+### ✅ 驗證 (Verification)
+*   `python3 check_syntax.py` 全數通過。
+*   **stub `fetch` 隔離測試 5 條全過**：`callCount === 1`；`responseMimeType` 與 `required` / `propertyOrdering` 正確注入；對話歷史 2 筆正常帶入；Markdown 包裹的 JSON 可解析；缺 `coachHint` 與空白 `reply` 皆拋出真實錯誤；無金鑰時零網路請求。
+*   **真實瀏覽器實測全過**：開場面板可見且為中性空狀態、無寫死臨床斷言；首回合督導提示**無需點擊即可閱讀**；切換按鈕收合／展開與標籤同步；失敗回合呈現真實錯誤（`API key not valid`）、原文回填輸入框、孤立使用者氣泡已移除、面板中性且不含臨床內容；無金鑰時顯示「示範劇本」標記，有金鑰時隱藏。
+*   ⚠️ **未執行**：真實 Gemini 金鑰端對端實跑。需擁有者在設定頁配置金鑰後跑一輪面談，確認雙角色分離效果與 `propertyOrdering` 不被該模型拒絕（若回傳 400，移除該欄位即可，順序要求已同時寫入 `systemInstruction`）。
+
+### 📐 文檔同步
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§3.2 改寫為現行的單次結構化往返；§7 漂移表 **D1、D2、D3、D4、D1′ 標記為 RESOLVED**，D14 標記為部分處理。**D5（離線通用假對白）、D6／D6′（草稿無持久層與「已安全備份」不實聲明）、D13（每日用量上限）仍未解決**，分屬 M6／M7／M8。
+*   [adr/0002-unified-structured-gemini-schema.md](adr/0002-unified-structured-gemini-schema.md)：狀態更新為已實作，並記錄本次是在現行 `main` 上重新實作而非 cherry-pick `e06789d`（該提交與其後落地的保險箱與文檔工作衝突）。決策原文一字未改。
+*   [Product_Roadmap.md](Product_Roadmap.md)：M5 標記為「已建置，待真實金鑰驗證」，並連結 plan/05。
+*   [plan/05-synchronous-dual-track-response.md](plan/05-synchronous-dual-track-response.md)：新增，含完整驗證結果表。
+
+### 📦 變更檔案 (Files Changed)
+*   [geminiService.js](geminiService.js)：`callGeminiAPI()` 新增 `responseSchema` 參數；`generateClientReply()` 重寫為單次雙角色結構化呼叫並加入嚴格驗證；刪除 `generateCoachHint()`；區塊註解重新編號。
+*   [app.js](app.js)：督導面板預設可見與中性空狀態；新增 `setCoachPanelVisible()`；失敗回合回滾；離線示範標記；移除 `clientShortName`；更新 `geminiService.js` 快取戳記。
+*   [index.html](index.html)：更新 `app.js` 快取戳記。
+
+---
+
+## [v20260827_v20_prd_v3] - 2026-08-27 23:30 (香港時間 UTC+8)
+
+本次為產品意圖更新提交，**不涉及任何執行碼變更**。
+
+### 📜 PRD 升版 v1 → v3（經擁有者批准後儲存，寫入前已完整顯示差異）
+*   **納入四個已上線但從未記載的功能區**：理論學習 Hub、小組投影研討、MI 分階練習寫入 USER JOURNEY 第 1 步；成就徽章寫入第 5 步。此前它們完全不在 PRD 內 —— 屬 PRD 落後於產品，以記載解決而非移除功能。
+*   **刻意排除激勵金句**：介面點綴不構成產品意圖，不應由 PRD 承擔。
+*   **明確劃開小組研討與「多輔導員同步會議室」**：OUT OF SCOPE 現寫明小組研討是「單機本地投影預設教學個案」，無連線層、無共享房間、無第二台參與者裝置，避免日後被誤讀為可建連線功能。
+*   **SUCCESS 收緊**：由 v1「1.5 秒內收到回應與提示」改為單次示範可親眼觀察的「回應與督導提示一同到達且**已可閱讀、無需額外點擊**」。原措辭無法在單次示範中證實，且僅要求「同時到達」不足以排除目前預設隱藏的實作。
+*   **新增三條硬性限制**：
+    *   `No Fabricated Clinical Content` —— 罐頭文字不得出現在同工會合理讀作 AI 臨床分析的位置；示範對白僅限明示的無金鑰模式、僅限有預設劇本的個案、且每一句須可見標示為劇本。
+    *   `Degradation Honesty` —— 耐久儲存不可用時須明白告知並封鎖還原。
+    *   `Usage Guardrail` —— 每位同工每日模型呼叫上限，設定頁顯示餘額。
+*   **資料歸屬條款補上撰寫中草稿**：明訂草稿在僅存於面談畫面期間須有防遺失保護，且**介面不得謊稱草稿已儲存或已備份**。
+*   **確立督導為應用程式外的收件人角色**：無帳號、無應用內存取權，只看同工主動匯出的檔案。因此無需帳號層或伺服器權限關卡，與無伺服器的存取模型一致。
+*   **新增 OUT OF SCOPE**：伺服器帳號／登入／雲端同步；續接中斷的面談。
+
+### 🗺️ 路線圖：每日用量上限併入 Milestone 8
+PRD v3 新增的 `Usage Guardrail` 條款原本無任何里程碑涵蓋。經擁有者決定併入 **Milestone 8「可信賴的本地紀錄」**，不另開里程碑 —— 該里程碑已在處理設定頁的金鑰痕跡與紀錄一致性，用量餘額同屬「與金鑰相關的可信資訊」。
+
+### 🔄 因 v3 而更新的其他支柱文件
+*   [CLAUDE.md](CLAUDE.md)：移除已不成立的「PRD 為 v1 且落後於產品」敘述，改記錄 v3 涵蓋範圍與刻意排除項。
+*   [ARCHITECTURE.md](ARCHITECTURE.md) §7：D9（五功能未記載）與 D10（生成器參數數量、「verified」無實作）標記為 **RESOLVED**；新增「New gaps introduced by PRD v3」小節，記錄 v3 製造的四項新漂移 —— **D13** 每日用量上限完全未建置、**D14** 示範對白逐句標示未建置、**D1′** 督導提示預設可見（M5 驗收標準收緊）、**D6′** 介面不得謊稱已儲存（M7 驗收標準收緊）。
+
+> 收緊 PRD 的代價是程式碼與它的距離變遠。這些新漂移是刻意記錄的已知差距，不是遺漏。
+
+### 📦 變更檔案 (Files Changed)
+*   [PRD.md](PRD.md)：v1 → v3。
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 8 納入每日用量上限。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§7 標記 D9/D10 已解決，新增 v3 引入的四項新漂移。
+*   [CLAUDE.md](CLAUDE.md)：更新 PRD 現況敘述。
+*   [CHANGELOG.md](CHANGELOG.md)：本條目。
+
+---
+
+## [v20260827_v19_docs_governance] - 2026-08-27 23:14 (香港時間 UTC+8)
+
+本次為文檔治理與全面審計提交，**不涉及任何執行碼變更**。
+
+### 📐 建立四支柱 SSOT 文檔治理 (ADR-0006)
+*   確立每份文件只負責一種權威：憲章 `CLAUDE.md`＝AI 行為、`PRD.md`＝產品意圖、程式碼（由 `ARCHITECTURE.md` 描述）＝實際行為、`CHANGELOG.md`＝歷史。
+*   新增 [adr/0006-four-pillar-ssot-documentation.md](adr/0006-four-pillar-ssot-documentation.md)，記錄採用方案、三個被否決方案與理由。
+*   `DECISIONS.md` 補上 ADR-0006，並為 ADR-0005 標註實作日期。
+
+### 🔍 PRD ↔ 程式碼全面審計（`origin/main` = `1d531a5`，與線上部署逐位元組相同）
+逐條核對 `PRD.md` v1 的 32 行原文，發現 **6 項阻塞級漂移**與 **6 項已記錄不阻塞漂移**，全數寫入 [ARCHITECTURE.md](ARCHITECTURE.md) 新增的第 7 節。其中兩項為本輪新發現：
+*   **D1（最嚴重）**：督導提示容器預設 `display:none`，且 `app.js:3816` 在**每一回合主動重設為隱藏**。同工每說一句都要再點一次才看得到提示。PRD USER JOURNEY 3 要求「delivered alongside client dialogue」，北極星承諾「real-time clinical supervision」—— 產品的核心價值目前藏在一顆每回合都要重按的按鈕後面。
+*   **D6**：SOAP／ICF 草稿只存在於 `state.activeSession.notes` 記憶體，全檔無 `beforeunload`，但畫面上有綠點寫著**「已安全備份」**（`app.js:3427`、`3596`）。這是對耐久性的不實聲明，且違反 PRD「SOAP drafts reside in IndexedDB」。
+*   另補記 D4（開場督導提示寫死，對所有個案一律宣稱「強烈的抗拒姿態」，不論其 MI 抗拒參數）與 D5（離線模式對所有 AI 生成個案回傳同一句假對白且無示範標示）—— 連同既知的 D3 罐頭提示，全系統共有**四處假資料**。
+
+### ✏️ 更正 ARCHITECTURE.md 的不實描述
+*   第 3.2 節原文宣稱「A single round-trip Gemini call with a strict `responseSchema` generates both `{ reply, coachHint }` in <1.5s」。**實況是兩次循序純文字呼叫，全檔 `responseSchema` 出現次數為 0。** 該段描述的是意圖而非實況，已改寫為實際行為並標註與 ADR-0002 的偏離。此正是 ADR-0006 否決「讓 ARCHITECTURE 描述目標設計」的具體案例。
+*   `Last Reconciled` 由 `2026-08-15 00:44:54 HKT` 更新為 `2026-08-27 23:14 HKT`。
+*   [adr/0002-unified-structured-gemini-schema.md](adr/0002-unified-structured-gemini-schema.md) 附加實作註記，指明該決策未反映於出貨程式碼，符合實作在 `rollback` 分支 `e06789d` 但從未合併。**決策原文與 Deciders 欄位一字未改**（ADR 不可追溯改寫）。
+
+### 🗺️ 路線圖重排為 Milestone 1–8
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 1–4 既有英文內容一字未改；更正 M2 為「Half Delivered ⚠️」（提示品質已交付、同步性未交付）、M3 與 M4 為「Completed ✅」（此前長期停留在 Next／Planned）。
+*   新增 M5「同一口氣的雙軌回應」（下一個）、M6「誠實的離線示範」、M7「不會憑空消失的面談」、M8「可信賴的本地紀錄」，全部可追溯至 PRD 具體條文，未發明 PRD 以外範圍。
+
+### 📎 補記：先前未寫入本檔的文檔提交 `9c87874`
+*   修正 `CHANGELOG.md`(26)、`DECISIONS.md`(5)、`Product_Roadmap.md`(4)、`plan/01`(1) 共 **36 個** `file:///Users/wongsir1011/.gemini/antigravity/scratch/...` 絕對連結為 repo 相對路徑。這些連結在 GitHub 上無法點擊、換機即失效，且指向本機另一個過時的 clone。
+*   移除 `Product_Roadmap.md` 內 `plan/02`、`plan/03`、`plan/04` 三個斷鏈（該三份 plan 從未撰寫）。
+*   新增 `CLAUDE.md` 至 `main`（此前只存在於已擱置的 `rollback` 分支 `b23fd66`），並更正兩處會誤導後續開發的描述：舊版把 `src/` 描述為使用中的模組化元件（實際只有 `src/utils/db.js` 被引用，其餘 18 個檔案從未被 import 卻仍被部署），以及補上快取戳記規範（無打包工具，不更新 `?v=` 參數則使用者看不到修改）。
+
+### ⚠️ 未處理事項（需擁有者決定）
+*   **`PRD.md` 仍為 v1，本輪未改動。** 審計發現五個已上線功能區（理論學習 Hub、小組研習 Studio、MI 五關卡遊戲、成就徽章、激勵金句）完全不在 PRD 內。此為 PRD 落後於產品實況，應由更新 PRD 解決而非移除功能 —— 而 PRD 變更需擁有者批准且不得靜默覆寫，故本輪僅記錄。
+*   本輪提出的 PRD v2 草案未獲批准，不作數。
+
+### 📦 變更檔案 (Files Changed)
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：更正第 3.2 節為實際行為；新增第 7 節「Known Drift: Code vs. PRD」；更新對帳時間。
+*   [Product_Roadmap.md](Product_Roadmap.md)：更正 M2/M3/M4 狀態，新增 M5–M8，加入檔頭用途說明。
+*   [DECISIONS.md](DECISIONS.md)：新增 ADR-0006，ADR-0005 標註實作日期。
+*   [adr/0006-four-pillar-ssot-documentation.md](adr/0006-four-pillar-ssot-documentation.md)：新增。
+*   [adr/0002-unified-structured-gemini-schema.md](adr/0002-unified-structured-gemini-schema.md)：附加實作註記。
+*   [CHANGELOG.md](CHANGELOG.md)：本條目。
+
+---
+
 ## [v20260827_v18_adr0005] - 2026-08-27 (香港時間 UTC+8)
 
 ### 🔐 本地保險箱遷移至 IndexedDB，並實裝一鍵全量備份／還原，兌現 ADR-0005
