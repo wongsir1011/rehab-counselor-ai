@@ -1,7 +1,7 @@
 # Milestone 1 Plan: The Spoken Cantonese Clinical Encounter
 
 * **Status**: Completed & Verified ✅
-* **Roadmap Ref**: [Product Roadmap Milestone 1](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/Product_Roadmap.md)
+* **Roadmap Ref**: [Product Roadmap Milestone 1](../Product_Roadmap.md)
 * **Target Outcome**: Continuous Cantonese STT with pause buffering + MiniMax Cantonese neural TTS with gender timbre binding + Web Speech fallback.
 * **Delivered In**: Commit `2b6ed23`
 

@@ -6,7 +6,7 @@
 **User-Facing Value**:  
 Counselors experience uninterrupted spoken Cantonese roleplay. Voice input listens continuously through natural thinking pauses without cutting off mid-sentence, while client responses are spoken aloud in authentic Hong Kong Cantonese neural audio strictly matching the persona’s gender (male voices for male cases, female voices for female cases).  
 *Traces to PRD: USER JOURNEY Step 2, SUCCESS, HARD CONSTRAINTS (Voice & Timbre Binding)*  
-*Plan*: [`plan/01-spoken-cantonese-encounter.md`](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/plan/01-spoken-cantonese-encounter.md)  
+*Plan*: [`plan/01-spoken-cantonese-encounter.md`](plan/01-spoken-cantonese-encounter.md)  
 *Delivered in*: Commit `2b6ed23`
 
 ---
@@ -15,7 +15,7 @@ Counselors experience uninterrupted spoken Cantonese roleplay. Voice input liste
 **User-Facing Value**:  
 During live roleplay, every counselor turn delivers a lightning-fast (<1.5s), simultaneous double-track response: the client's realistic Cantonese reaction on the main stage, and an instant clinical supervisor micro-hint in the sidebar. The hint pinpoints client motivational signals (Change Talk, Sustain Talk, experiential avoidance) and suggests precise next-step OARS or ACT interventions.  
 *Traces to PRD: USER JOURNEY Step 3, SUCCESS, HARD CONSTRAINTS (AI Gateway & Validation)*  
-*Plan*: [`plan/02-synchronous-clinical-supervisor.md`](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/plan/02-synchronous-clinical-supervisor.md)
+*Plan*: 未撰寫（`plan/02` 從未建立）
 
 ---
 
@@ -23,7 +23,7 @@ During live roleplay, every counselor turn delivers a lightning-fast (<1.5s), si
 **User-Facing Value**:  
 Counselors can instantly generate unlimited custom Hong Kong disability cases tailored by age, disability type, and resistance level with clean, authentic profile visuals. Alongside the case library, an interactive ICF Biopsychosocial Sandbox lets counselors drag, drop, and categorize complex environmental barriers and personal strengths directly into their clinical assessment workflow.  
 *Traces to PRD: USER JOURNEY Steps 1 & 4, SUCCESS*  
-*Plan*: [`plan/03-case-forge-icf-sandbox.md`](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/plan/03-case-forge-icf-sandbox.md)
+*Plan*: 未撰寫（`plan/03` 從未建立）
 
 ---
 
@@ -31,7 +31,7 @@ Counselors can instantly generate unlimited custom Hong Kong disability cases ta
 **User-Facing Value**:  
 After completing a counseling session, counselors receive a 5-dimension clinical radar evaluation and can export a formatted clinical case report (containing full verbatim transcripts, completed SOAP notes, and the ICF diagnostic matrix) for internal agency supervision. All session histories and custom cases are permanently preserved in a local browser vault with 1-click JSON backup and restore capabilities.  
 *Traces to PRD: USER JOURNEY Step 5, SUCCESS, HARD CONSTRAINTS (Roles & Privacy, SSOT)*  
-*Plan*: [`plan/04-portfolio-exporter-safe-vault.md`](file:///Users/wongsir1011/.gemini/antigravity/scratch/rehab-counselor-ai/plan/04-portfolio-exporter-safe-vault.md) *(file absent from repo — broken link, as are the plan/02 and plan/03 links above)*
+*Plan*: 未撰寫（`plan/04` 從未建立）—— 僅 Milestone 1 有對應的 plan 文件
 
 **Safe Vault delivered 2026-08-27** per [ADR-0005](adr/0005-indexeddb-local-vault-persistence.md): session history and custom cases moved from `localStorage` to IndexedDB (`RehabCounselorDB`), with verified boot-time migration, 1-click full-vault JSON backup/restore under Settings → 資料保險箱, a backup prompt before the Danger Zone reset, and an explicit degraded mode when IndexedDB is unavailable. Backups deliberately exclude API keys. See `ARCHITECTURE.md` §6.
 
