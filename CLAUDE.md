@@ -23,7 +23,7 @@ Format is `vYYYYMMDD_vNN_shortname` (e.g. `v20260827_v18_adr0005`). Forgetting t
 
 `ARCHITECTURE.md` describes the code **as it is, not as intended** — where they differ, record the drift in its §7 rather than describing the target design. That rule exists because §3 claimed a single structured AI round-trip that the code never had, and the claim survived unchallenged for weeks.
 
-`PRD.md` is currently **v1 and known to lag the product**: five shipped areas (Theory Hub, Co-Learning Studio, MI 5-stage game, achievements, motivational quotes) are absent from it. Fix by updating the PRD with owner approval — never by silently overwriting it, and never by deleting features to match.
+`PRD.md` is at **v3** (approved 2026-08-27), and now covers the Theory Hub, group projector study, MI staged drills, and achievements. It deliberately **omits motivational quotes** — interface garnish is not product intent. PRD changes need owner approval and the diff shown first; never overwrite it silently, and never delete features to make the code match it.
 
 **4. ADRs are immutable history.** `adr/*.md` records the decision as made, including its `Deciders` field. Add an Implementation Note or a new ADR; never rewrite a past decision to match present reality.
 

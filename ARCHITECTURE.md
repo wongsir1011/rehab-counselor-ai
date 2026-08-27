@@ -109,9 +109,9 @@ initApp()  →  await hydrateVault()  →  switchView("dashboard")   // first re
 
 ---
 
-## 7. Known Drift: Code vs. PRD (audited 2026-08-27 23:14 HKT)
+## 7. Known Drift: Code vs. PRD (audited 2026-08-27 23:14 HKT against PRD v1; re-based on PRD v3 at 23:28 HKT)
 
-A full clause-by-clause audit of `PRD.md` v1 against `origin/main` (`1d531a5`, byte-identical to the live deployment) found the following. This section records **what the code actually does**; it is not a to-do list — sequencing lives in `Product_Roadmap.md`.
+A full clause-by-clause audit of `PRD.md` against `origin/main` (`1d531a5`, byte-identical to the live deployment) found the following. This section records **what the code actually does**; it is not a to-do list — sequencing lives in `Product_Roadmap.md`.
 
 ### Blocking the Northstar or the SUCCESS criterion
 
@@ -130,10 +130,21 @@ A full clause-by-clause audit of `PRD.md` v1 against `origin/main` (`1d531a5`, b
 | :--- | :--- | :--- |
 | D7 | Completed-session count has three parallel homes: `sessions` store (authoritative), `rehab_completed_cases_count`, `rehab_completed_case_ids` | SSOT breach; kept in sync by three adjacent assignments in `app.js:4323-4328` |
 | D8 | MiniMax diagnostics persist a masked key (first 5 + last 4 chars) and a plaintext Group ID to `localStorage` with no expiry | `app.js:3940`, `3970`, `3973`. Excluded from vault backups. |
-| D9 | Five shipped feature areas are absent from `PRD.md`: Theory Hub, Co-Learning Studio, MI 5-stage game, achievements, motivational quotes | Resolve by updating the PRD, not by removing features. PRD change requires owner approval. |
-| D10 | Case generator exposes four parameters (disability chip, age stage, ACT motivation, MI stage); the PRD names three. "Verified Cantonese dialogue characteristics" has no verification step. | Superset, harmless |
+| ~~D9~~ | ~~Five shipped feature areas absent from `PRD.md`~~ | **RESOLVED by PRD v3 (2026-08-27 23:28 HKT)**: Theory Hub, group projector study, MI staged drills and achievements are now written into USER JOURNEY steps 1 and 5. Motivational quotes were deliberately left out as interface garnish, not product intent. |
+| ~~D10~~ | ~~Generator exposes four parameters where the PRD named three; "verified" dialogue characteristics had no verification step~~ | **RESOLVED by PRD v3**: journey step 2 now names all four parameters, and the unbacked word "verified" was dropped. |
 | D11 | `sessions` has no index; ordering relies on `b.id.localeCompare(a.id)` being correct only because `"session_" + Date.now()` is fixed-width | Correct today, fragile by construction |
 | D12 | ICF sandbox lives in the case catalog, not in the interview view; it does not assist SOAP drafting | USER JOURNEY 4 "assisted by" unfulfilled |
+
+### New gaps introduced by PRD v3 (2026-08-27 23:28 HKT)
+
+PRD v3 tightened several clauses and added one wholly new obligation. Measured against the same `origin/main`:
+
+| ID | PRD v3 clause | Code status |
+| :--- | :--- | :--- |
+| D13 | **Usage Guardrail** — a per-counselor daily cap on model calls, shown in settings with the remaining budget | **Not built at all.** No call counter, no cap, no settings surface. Scheduled into **Milestone 8** by owner decision on 2026-08-27. |
+| D14 | **No Fabricated Clinical Content** — scripted demo turns must be *visibly marked as scripted*, and a case with no authored script cannot be roleplayed without a key | Not built. Milestone 6 covers the "cannot be roleplayed without a key" half; per-turn scripted marking is newly required by v3. |
+| D1′ | Supervisor hint **visible by default on arrival** (v1 said only "delivered alongside") | Still `display:none` + re-hidden每turn. Milestone 5 must now satisfy the stricter wording, not just merge the two calls. |
+| D6′ | Interface **must never claim a draft is saved when it is not** (v1 implied only the storage location) | The "已安全備份" indicator still makes the false claim. Milestone 7 must remove or truth-up the indicator, not only add the leave-guard. |
 
 ### Confirmed sound
 
