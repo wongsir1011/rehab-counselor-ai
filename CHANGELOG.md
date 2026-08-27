@@ -4,6 +4,44 @@
 
 ---
 
+## [v20260828_v21_m5] - 2026-08-27 23:43 (香港時間 UTC+8)
+
+### ⚡ Milestone 5 交付：同一口氣的雙軌回應，兌現 ADR-0002
+依 [plan/05-synchronous-dual-track-response.md](plan/05-synchronous-dual-track-response.md) 建置。
+
+*   **單次結構化往返 (Single Structured Round-Trip)**：
+    *   `callGeminiAPI()` 新增第 7 個參數 `responseSchema`；提供時於 `generationConfig` 同時注入 `responseMimeType: "application/json"` 與 schema。既有 `responseJson` 參數與其四個呼叫點完全不動，無回歸風險。
+    *   `generateClientReply()` 由**兩次循序純文字呼叫**改為**單次呼叫**，schema 為 `{ reply, coachHint }` 兩個 STRING 欄位，`required` 兩者、`propertyOrdering` 先 `reply` 後 `coachHint`，保留督導須分析案主回應的邏輯依賴。同一順序要求另以文字寫入 `systemInstruction`，不單靠該欄位。
+    *   `systemInstruction` 以分隔區塊定義雙重角色：角色 A 案主（`reply` 僅限廣東話對白，明文禁止旁白、動作描述、括號註解、角色標籤與臨床分析 —— 該欄位直接送入 TTS 朗讀）；角色 B 臨床督導（`coachHint` 明文禁止使用案主口吻或重複案主對白）。
+    *   解析後嚴格驗證兩欄位皆存在、為字串、trim 後非空；任一不符即拋出真實錯誤並附原始回應內容。
+*   **刪除罐頭督導提示 (Fail Loudly, No Fake Data)**：`generateCoachHint()` 整支函式連同其 catch 回傳的寫死臨床建議字串（「【AI 督導提示暫時無法加載】…」）移除。該降級路徑會把預先寫死的通用臨床建議偽裝成 AI 督導分析，且在畫面上與真實分析完全無法分辨。
+*   **督導提示預設可見 (PRD v3: visible by default on arrival)**：
+    *   移除面板的 `display:none` 初始樣式，並將每回合結束時的 `display = "none"` 改為可見。**此前每一回合都主動把提示重新藏起，同工每說一句話都要再點一次按鈕** —— 產品核心價值長期被藏在一顆重複按鈕之後。
+    *   新增 `setCoachPanelVisible()` 作為面板顯示狀態的單一控制點，令面板與切換按鈕的圖示／文字永遠一致。切換按鈕保留 —— PRD 允許 dismissible，只禁止預設隱藏。
+*   **移除寫死的開場督導提示**：原文對**所有**個案一律宣稱「案主剛進來，擺出強烈的抗拒姿態」，不論該個案的 MI 抗拒參數為何，屬未經任何 AI 分析的偽臨床判斷。改為不含任何臨床斷言的中性空狀態。此項為 M5 必要之舉：面板改為常駐可見後，該段文字會成為同工開啟面談後看到的第一段、且持續可見的內容。連帶移除因此失去用途的 `clientShortName` 變數。
+*   **失敗回合乾淨回滾**：原本失敗時只彈出 alert，但使用者訊息已寫入 `state.activeSession.history` 且氣泡已渲染，形成**無配對的孤立 user 回合**，會污染下一回合送出的對話歷史，並使離線模式的 `step = history.length / 2` 計算錯位。現改為移除該筆記錄與其氣泡（僅在最後節點確實為 `.bubble-user` 時才移除）、**把原文放回輸入框**供直接重試，面板顯示中性訊息且不含任何臨床內容，並保留 alert 呈現真實錯誤。
+*   **離線示範的面板標示**：無金鑰時督導面板顯示常駐「示範劇本」標記，防止 M5 的常駐可見把示範內容提升為持續可見的偽督導分析。逐句標示與「無劇本個案不得試玩」仍屬 Milestone 6。
+*   **快取破除**：`index.html` 的 `app.js?v=` 與 `app.js` 的 `geminiService.js?v=` 一併更新至 `v20260828_v21_m5`（後者自 `v20260724_v13_1` 起未曾更新）。
+
+### ✅ 驗證 (Verification)
+*   `python3 check_syntax.py` 全數通過。
+*   **stub `fetch` 隔離測試 5 條全過**：`callCount === 1`；`responseMimeType` 與 `required` / `propertyOrdering` 正確注入；對話歷史 2 筆正常帶入；Markdown 包裹的 JSON 可解析；缺 `coachHint` 與空白 `reply` 皆拋出真實錯誤；無金鑰時零網路請求。
+*   **真實瀏覽器實測全過**：開場面板可見且為中性空狀態、無寫死臨床斷言；首回合督導提示**無需點擊即可閱讀**；切換按鈕收合／展開與標籤同步；失敗回合呈現真實錯誤（`API key not valid`）、原文回填輸入框、孤立使用者氣泡已移除、面板中性且不含臨床內容；無金鑰時顯示「示範劇本」標記，有金鑰時隱藏。
+*   ⚠️ **未執行**：真實 Gemini 金鑰端對端實跑。需擁有者在設定頁配置金鑰後跑一輪面談，確認雙角色分離效果與 `propertyOrdering` 不被該模型拒絕（若回傳 400，移除該欄位即可，順序要求已同時寫入 `systemInstruction`）。
+
+### 📐 文檔同步
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§3.2 改寫為現行的單次結構化往返；§7 漂移表 **D1、D2、D3、D4、D1′ 標記為 RESOLVED**，D14 標記為部分處理。**D5（離線通用假對白）、D6／D6′（草稿無持久層與「已安全備份」不實聲明）、D13（每日用量上限）仍未解決**，分屬 M6／M7／M8。
+*   [adr/0002-unified-structured-gemini-schema.md](adr/0002-unified-structured-gemini-schema.md)：狀態更新為已實作，並記錄本次是在現行 `main` 上重新實作而非 cherry-pick `e06789d`（該提交與其後落地的保險箱與文檔工作衝突）。決策原文一字未改。
+*   [Product_Roadmap.md](Product_Roadmap.md)：M5 標記為「已建置，待真實金鑰驗證」，並連結 plan/05。
+*   [plan/05-synchronous-dual-track-response.md](plan/05-synchronous-dual-track-response.md)：新增，含完整驗證結果表。
+
+### 📦 變更檔案 (Files Changed)
+*   [geminiService.js](geminiService.js)：`callGeminiAPI()` 新增 `responseSchema` 參數；`generateClientReply()` 重寫為單次雙角色結構化呼叫並加入嚴格驗證；刪除 `generateCoachHint()`；區塊註解重新編號。
+*   [app.js](app.js)：督導面板預設可見與中性空狀態；新增 `setCoachPanelVisible()`；失敗回合回滾；離線示範標記；移除 `clientShortName`；更新 `geminiService.js` 快取戳記。
+*   [index.html](index.html)：更新 `app.js` 快取戳記。
+
+---
+
 ## [v20260827_v20_prd_v3] - 2026-08-27 23:30 (香港時間 UTC+8)
 
 本次為產品意圖更新提交，**不涉及任何執行碼變更**。

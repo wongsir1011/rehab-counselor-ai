@@ -1,7 +1,7 @@
 // RehabCounselor AI - 主應用控制器 (Vanilla SPA Engine)
 
 import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260724_v13_1";
-import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260724_v13_1";
+import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260828_v21_m5";
 import { RehabCounselorDB } from "./src/utils/db.js?v=20260827_v18_adr0005";
 
 // Global App State
@@ -3310,7 +3310,6 @@ function startRoleplaySession(selectedCase) {
 
   const mount = document.getElementById("content-view-mount");
   
-  const clientShortName = selectedCase.name.split(" ")[0] || selectedCase.name;
   
   mount.innerHTML = `
     <div class="roleplay-room">
@@ -3401,15 +3400,18 @@ function startRoleplaySession(selectedCase) {
         <!-- Live AI Coach Feedback Box -->
         <div class="glass-card" style="flex:1 1 0%; min-height:0; display:flex; flex-direction:column; gap:10px; overflow-y:auto; padding:16px;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-            <div class="supervisor-badge">
-              <i class="fa-solid fa-user-tie"></i> AI 臨床督導助教 (Coach)
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <div class="supervisor-badge">
+                <i class="fa-solid fa-user-tie"></i> AI 臨床督導助教 (Coach)
+              </div>
+              ${!state.apiKey ? `<span id="rp-coach-demo-badge" style="font-size:0.66rem; font-weight:800; letter-spacing:0.3px; color:var(--accent-amber, #f59e0b); background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); padding:2px 7px; border-radius:5px; white-space:nowrap;"><i class="fa-solid fa-clapperboard"></i> 示範劇本</span>` : ""}
             </div>
             <button class="btn btn-primary" id="rp-show-coach-hint-btn" style="padding:4px 8px; font-size:0.7rem; display:flex; align-items:center; gap:4px; height:auto; background:var(--accent-purple);">
-              <i class="fa-solid fa-eye"></i> <span id="rp-show-coach-hint-btn-text">${state.locale === "en" ? "Show Supervisor Suggestion" : "顯示督導建議回應"}</span>
+              <i class="fa-solid fa-eye-slash"></i> <span id="rp-show-coach-hint-btn-text">${state.locale === "en" ? "Hide Supervisor Suggestion" : "隱藏督導建議回應"}</span>
             </button>
           </div>
-          <div id="rp-coach-feedback" style="font-size:0.82rem; color:var(--text-main); line-height:1.5; display:none; background:var(--nested-bg-medium); padding:10px; border-radius:8px; border:1px dashed var(--card-border);">
-            【會話初始提示】：案主${clientShortName}剛進來，擺出強烈的抗拒姿態。請不要立刻勸他去上堂，建議先使用 MI 的「同理反映」接納他的氣憤與無力感，與他建立工作同盟。
+          <div id="rp-coach-feedback" style="font-size:0.82rem; color:var(--text-muted); line-height:1.5; background:var(--nested-bg-medium); padding:10px; border-radius:8px; border:1px dashed var(--card-border);">
+            ${state.locale === "en" ? "No supervisor analysis yet. It will appear here, already open, as soon as you speak to the client." : "尚未有督導分析。開始與案主對話後，督導提示會即時出現在此處，無需點擊。"}
           </div>
         </div>
 
@@ -3614,17 +3616,8 @@ function startRoleplaySession(selectedCase) {
     hintBtn.addEventListener("click", () => {
       AudioSynth.playClick();
       const fb = document.getElementById("rp-coach-feedback");
-      const icon = hintBtn.querySelector("i");
-      const text = document.getElementById("rp-show-coach-hint-btn-text");
-      if (fb.style.display === "none") {
-        fb.style.display = "block";
-        icon.className = "fa-solid fa-eye-slash";
-        text.textContent = state.locale === "en" ? "Hide Supervisor Suggestion" : "隱藏督導建議回應";
-      } else {
-        fb.style.display = "none";
-        icon.className = "fa-solid fa-eye";
-        text.textContent = state.locale === "en" ? "Show Supervisor Suggestion" : "顯示督導建議回應";
-      }
+      if (!fb) return;
+      setCoachPanelVisible(fb.style.display === "none");
     });
   }
 
@@ -3810,17 +3803,13 @@ async function submitMessageToAI(text) {
     speakCantonese(reply, bubbleEl);
 
     // 6. Update AI Coach Feedback Sidebar
+    //    PRD v3 (AI Gateway)：督導提示必須「visible by default on arrival」。
+    //    仍可由同工手動收合，但絕不預設隱藏。
     const coachFeedback = document.getElementById("rp-coach-feedback");
     if (coachFeedback) {
       coachFeedback.innerHTML = coachHint.replace(/\n/g, "<br>");
-      coachFeedback.style.display = "none"; // Hide by default
-      const hintBtn = document.getElementById("rp-show-coach-hint-btn");
-      if (hintBtn) {
-        const icon = hintBtn.querySelector("i");
-        const text = document.getElementById("rp-show-coach-hint-btn-text");
-        if (icon) icon.className = "fa-solid fa-eye";
-        if (text) text.textContent = state.locale === "en" ? "Show Supervisor Suggestion" : "顯示督導建議回應";
-      }
+      coachFeedback.style.color = "var(--text-main)";
+      setCoachPanelVisible(true);
     }
 
   } catch (error) {
@@ -3828,7 +3817,52 @@ async function submitMessageToAI(text) {
     if (activeAvatar) {
       activeAvatar.classList.remove("avatar-pulsing-glow");
     }
+
+    // 失敗回合乾淨回滾：移除這一筆未配對的 user 記錄與其氣泡，
+    // 否則它會污染下一回合送出的對話歷史，並使離線模式的 step 計算錯位。
+    // 原文回填輸入框讓同工可直接重試，不必重打。
+    const lastEntry = state.activeSession.history[state.activeSession.history.length - 1];
+    if (lastEntry && lastEntry.role === "user") {
+      state.activeSession.history.pop();
+    }
+    const lastBubble = chatFeed ? chatFeed.lastElementChild : null;
+    if (lastBubble && lastBubble.classList.contains("bubble-user")) {
+      lastBubble.remove();
+    }
+    const inputEl = document.getElementById("rp-text-input");
+    if (inputEl && !inputEl.value.trim()) {
+      inputEl.value = text;
+    }
+
+    // 面板改為中性狀態，不留上一回合的分析假裝成本回合的結果，也不填任何臨床內容。
+    const coachFeedback = document.getElementById("rp-coach-feedback");
+    if (coachFeedback) {
+      coachFeedback.textContent = state.locale === "en"
+        ? "No supervisor analysis for this turn — the request failed. Your message has been returned to the input box; please try again."
+        : "本回合未取得督導分析（請求失敗）。你的發言已放回輸入框，可直接重試。";
+      coachFeedback.style.color = "var(--text-muted)";
+      setCoachPanelVisible(true);
+    }
+
     alert(`對話生成失敗：${error.message}`);
+  }
+}
+
+/**
+ * 督導提示面板顯示狀態的單一控制點：面板與切換按鈕的圖示／文字永遠一致。
+ */
+function setCoachPanelVisible(visible) {
+  const fb = document.getElementById("rp-coach-feedback");
+  const btn = document.getElementById("rp-show-coach-hint-btn");
+  if (fb) fb.style.display = visible ? "block" : "none";
+  if (!btn) return;
+  const icon = btn.querySelector("i");
+  const text = document.getElementById("rp-show-coach-hint-btn-text");
+  if (icon) icon.className = visible ? "fa-solid fa-eye-slash" : "fa-solid fa-eye";
+  if (text) {
+    text.textContent = visible
+      ? (state.locale === "en" ? "Hide Supervisor Suggestion" : "隱藏督導建議回應")
+      : (state.locale === "en" ? "Show Supervisor Suggestion" : "顯示督導建議回應");
   }
 }
 

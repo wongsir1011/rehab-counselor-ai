@@ -44,11 +44,11 @@ graph TD
    - Counselor taps microphone or holds `Space`.
    - `webkitSpeechRecognition` starts with `continuous: true` and `interimResults: true` using acoustic models (`yue-Hant-HK` / `zh-Hant-HK`).
    - Transcripts stream into the input buffer; silence buffers prevent premature cancellation.
-2. **AI Inference Gateway** ⚠️ *does not yet match [ADR-0002](adr/0002-unified-structured-gemini-schema.md)*:
+2. **AI Inference & Structured Gateway** (conforms to [ADR-0002](adr/0002-unified-structured-gemini-schema.md) since Milestone 5):
    - The user message, active case context, and conversational history are submitted to `generateClientReply()` in `geminiService.js`.
-   - **As actually built**: two *sequential* plain-text calls — `callGeminiAPI()` for `reply`, then `generateCoachHint()` for `coachHint`. There is no `responseSchema` anywhere in `geminiService.js`. Per-turn latency and token cost are therefore roughly double the intended design, and the PRD's "<1.5s" success criterion is not reachable in this shape.
-   - `generateCoachHint()` returns a hard-coded Chinese clinical sentence from its `catch`, which is displayed identically to a genuine AI hint. This violates the PRD's "no fake data" constraint.
-   - Converging on the single structured round-trip is **Milestone 5** in `Product_Roadmap.md`.
+   - **One** round-trip carries a dual-persona `systemInstruction` — Role A is the Cantonese client producing `reply`, Role B is the clinical supervisor producing `coachHint` — plus `responseMimeType: "application/json"` and a lean `responseSchema` with `required: ["reply","coachHint"]` and `propertyOrdering: ["reply","coachHint"]`, so the model writes the client reply first and then analyses it within the same pass. The same ordering requirement is also stated in prose inside the instruction, so behaviour does not depend on `propertyOrdering` alone.
+   - Role A is explicitly forbidden from putting narration, stage directions, or analysis into `reply` (that field is fed straight to TTS); Role B is forbidden from using the client's voice in `coachHint`.
+   - The response is parsed by `parseFlexibleJson()` (models occasionally still wrap JSON in Markdown), then **strictly validated**: if either field is absent, non-string, or blank after trimming, `generateClientReply()` throws with the raw response attached rather than substituting text. `generateCoachHint()` and its canned fallback sentence were deleted.
 3. **Audio Synthesis (TTS Router)**:
    - The returned `reply` is routed to `speakCantonese()`.
    - Client gender (`selectedCase.gender`) dictates voice model selection:
@@ -117,10 +117,10 @@ A full clause-by-clause audit of `PRD.md` against `origin/main` (`1d531a5`, byte
 
 | ID | Drift | Location | PRD clause breached |
 | :--- | :--- | :--- | :--- |
-| D1 | Supervisor hint is `display:none` by default and is **re-hidden on every turn** | `app.js:3411`, `app.js:3816` | USER JOURNEY 3 "delivered alongside client dialogue"; Northstar "real-time clinical supervision" |
-| D2 | Two sequential calls, zero `responseSchema` | `geminiService.js:222-223` | HARD CONSTRAINTS (AI Gateway); SUCCESS "<1.5s" |
-| D3 | Canned supervisor hint on failure | `geminiService.js` `generateCoachHint()` catch | HARD CONSTRAINTS "no fake data" |
-| D4 | Hard-coded opening hint asserts "強烈的抗拒姿態" for **every** case regardless of its MI resistance parameter | `app.js:3412` | Northstar "authentic" |
+| ~~D1~~ | ~~Supervisor hint hidden by default and re-hidden every turn~~ | **RESOLVED (M5, 2026-08-27)**: panel renders open, every turn sets it visible, and a single `setCoachPanelVisible()` keeps panel and toggle label in sync. The toggle remains — the PRD permits dismissible, not hidden-by-default. |
+| ~~D2~~ | ~~Two sequential calls, zero `responseSchema`~~ | **RESOLVED (M5)**: one `responseSchema`-constrained round-trip returning `{ reply, coachHint }`, verified by stub test asserting `callCount === 1`. |
+| ~~D3~~ | ~~Canned supervisor hint on failure~~ | **RESOLVED (M5)**: `generateCoachHint()` deleted. Failures surface the real error and leave the panel in a neutral, non-clinical state. |
+| ~~D4~~ | ~~Hard-coded opening hint asserting "強烈的抗拒姿態" for every case~~ | **RESOLVED (M5)**: replaced with a neutral empty state making no clinical claim. Necessary because M5 makes the panel permanently visible. |
 | D5 | Offline demo returns a generic scripted line when a case has no `roleplay_flow` — which is true of **every** AI-generated custom case — with no on-screen marking | `geminiService.js:183-186` | HARD CONSTRAINTS "no fake data" |
 | D6 | SOAP/ICF drafts live only in `state.activeSession.notes`; no `beforeunload` guard anywhere; the UI nevertheless displays a green **"已安全備份"** indicator | `app.js:3427`, `app.js:3596`, `app.js:3576-3578` | HARD CONSTRAINTS "SOAP drafts reside … in IndexedDB" |
 
@@ -142,8 +142,8 @@ PRD v3 tightened several clauses and added one wholly new obligation. Measured a
 | ID | PRD v3 clause | Code status |
 | :--- | :--- | :--- |
 | D13 | **Usage Guardrail** — a per-counselor daily cap on model calls, shown in settings with the remaining budget | **Not built at all.** No call counter, no cap, no settings surface. Scheduled into **Milestone 8** by owner decision on 2026-08-27. |
-| D14 | **No Fabricated Clinical Content** — scripted demo turns must be *visibly marked as scripted*, and a case with no authored script cannot be roleplayed without a key | Not built. Milestone 6 covers the "cannot be roleplayed without a key" half; per-turn scripted marking is newly required by v3. |
-| D1′ | Supervisor hint **visible by default on arrival** (v1 said only "delivered alongside") | Still `display:none` + re-hidden每turn. Milestone 5 must now satisfy the stricter wording, not just merge the two calls. |
+| D14 | **No Fabricated Clinical Content** — scripted demo turns must be *visibly marked as scripted*, and a case with no authored script cannot be roleplayed without a key | **Partially addressed (M5)**: the coach panel now carries a persistent "示範劇本" badge whenever no key is set, so M5 does not make demo content more deceptive by revealing it. Per-turn marking on chat bubbles and blocking scriptless cases remain **Milestone 6**. |
+| ~~D1′~~ | ~~Supervisor hint visible by default on arrival~~ | **RESOLVED (M5)**, verified in-browser: hint readable with no click on the first turn. |
 | D6′ | Interface **must never claim a draft is saved when it is not** (v1 implied only the storage location) | The "已安全備份" indicator still makes the false claim. Milestone 7 must remove or truth-up the indicator, not only add the leave-guard. |
 
 ### Confirmed sound

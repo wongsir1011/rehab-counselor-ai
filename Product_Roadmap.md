@@ -43,12 +43,13 @@ After completing a counseling session, counselors receive a 5-dimension clinical
 
 ---
 
-### Milestone 5: 同一口氣的雙軌回應 [下一個 ⏳]
+### Milestone 5: 同一口氣的雙軌回應 [已建置，待真實金鑰驗證 ⏳]
 **帶來的價值**：  
 同工說完一句話之後，案主的廣東話回應與督導提示**一起出現**，而不是先等案主講完、再等督導分析。等待時間減半，對話節奏終於接近真實面談 —— 這正是 Milestone 2 承諾卻尚未兌現的那一半。同時，督導提示不再可能是預先寫好的罐頭文字：拿不到真正的 AI 分析時，系統會直接說明失敗原因。
 
 **為何排在這裡**：它完成 Milestone 2，而且是 PRD SUCCESS 條款唯一還沒達成的部分。前四個里程碑建立的體驗都要靠它才算完整。  
 *Traces to PRD: SUCCESS, HARD CONSTRAINTS (AI Gateway & Validation)*  
+*Plan*: [`plan/05-synchronous-dual-track-response.md`](plan/05-synchronous-dual-track-response.md) — 已批准 2026-08-27 23:36 HKT  
 *相關決策*：[ADR-0002](adr/0002-unified-structured-gemini-schema.md)
 
 ---

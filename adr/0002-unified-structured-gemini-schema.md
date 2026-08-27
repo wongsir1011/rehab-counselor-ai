@@ -1,10 +1,12 @@
 # ADR-0002: Single-Roundtrip Structured Schema for Client Reply & Supervisor Hint
 
-* **Status**: Accepted — **not implemented in the shipped code** (see Implementation Note)
+* **Status**: Accepted — **implemented 2026-08-27** (Milestone 5)
 * **Date**: 2026-08-15
 * **Deciders**: Antigravity & Lead Counsel
 
-> **Implementation Note (2026-08-27 23:14 HKT audit)**: This decision is *not* reflected in `origin/main`. `geminiService.js:222-223` still issues two sequential plain-text calls (`callGeminiAPI()` then `generateCoachHint()`), and the file contains no `responseSchema` at all. The consequence the ADR set out to remove — doubled latency and token cost — is still present, and the PRD's "<1.5s" success criterion is unreachable in this shape. A conforming implementation exists on the abandoned `rollback` branch as commit `e06789d` but was never merged. Convergence is scheduled as **Milestone 5** in `Product_Roadmap.md`. The decision text below is left exactly as it was made.
+> **Implementation Note (2026-08-27 23:14 HKT audit)**: At the time of the audit this decision was *not* reflected in `origin/main` — `geminiService.js` issued two sequential plain-text calls and contained no `responseSchema`. A conforming implementation existed on the abandoned `rollback` branch as `e06789d` but was never merged.
+>
+> **Resolved (2026-08-27, Milestone 5)**: implemented fresh on top of the current `main` rather than cherry-picked, since `e06789d` conflicted with the vault and documentation work that landed after it. `generateClientReply()` now issues one `responseSchema`-constrained call returning `{ reply, coachHint }` with strict arrival validation, and `generateCoachHint()` — along with the canned fallback sentence that violated the PRD's no-fake-data constraint — was deleted. See [`plan/05-synchronous-dual-track-response.md`](../plan/05-synchronous-dual-track-response.md). The decision text below is left exactly as it was made.
 
 ## Context
 During live counseling simulations, counselors need immediate feedback from the simulated client and a simultaneous supervisory hint. Executing two sequential API calls created a 3.5–5.5s delay, breaking natural conversational immersion.
