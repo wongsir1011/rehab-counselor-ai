@@ -4,6 +4,45 @@
 
 ---
 
+## [v20260829_v25_f1_review] - 2026-08-29 02:04 (香港時間 UTC+8)
+
+本次為同儕審查記錄提交，**不涉及任何執行碼變更**。審查對象為 `f4f747d`（F1 修正）。
+
+### 🔴 D20：F1 的修正只做了一半 —— 「未評估」被呈現為「0 分」
+移除了偽造的高分，卻讓未評估的面談在三處被畫成零分。**那是同一個謊的鏡像：原本諂媚，現在貶低，兩者同樣不實**，而且違反的是同一條 PRD 條款 —— 讓同工讀到一個並不存在的臨床結論。
+
+*   **儀表板**（`app.js:800-802`）：顯示條件是 `historySessions.length > 0` 而非已評估數。以 `historySessions = [{report:null}]` 實際求值該運算式，結果為 **「0分」**，正確應為「—」。這代表只做過離線示範的同工，儀表板會說他的平均分是 0。
+*   **歷史詳情彈窗**（`app.js:5947` 之後）：**三者中最嚴重**。標題「本次面談技巧評分」下的整個雷達區塊仍無條件渲染，未評估者畫出塌陷在圓心的五邊形 —— 讀起來是「這場拿了 0 分」而非「這場沒有評估」。F1 修正當時只改了旁邊的督導總結文字，漏了分數區塊本身。
+*   **分析頁雷達**（`app.js:5581`、`5732`）：多邊形仍以全 0 的 `state.radarScores` 繪製。等第那行已正確顯示「尚無已評估的面談紀錄」，故旁邊尚有文字線索。
+
+三處是同一個缺陷，須在同一次修正中一併處理 —— 分開修就是產生此缺陷的那種狹隘修復。
+
+### ✅ 以實際執行確認無恙
+*   **重跑上一輪流程**：`check_syntax.py` 全綠；離線評估拋 `OFFLINE_NO_EVALUATION` 且零網路請求；有金鑰時評估正常且 prompt 確實帶入對話；**M6 四條與 M5 五條回歸全部通過**。
+*   **接縫**：`hasEvaluation()` 5 個使用點；`renderSessionReport` 僅一個呼叫者，故 `renderSessionCompletedWithoutEvaluation()` 讀 `state.activeSession` 必為當前面談，不會誤讀歷史紀錄；`exportSessionReport` 三個呼叫點（`null`／`report`／`session.report`）皆在守衛內；彙總處以 `.filter(hasEvaluation)` 呼叫，`filter` 多傳的 index/array 被忽略，行為正確。
+*   **資料表**：`src/utils/db.js` 未被改動，`DB_VERSION` 維持 1，無 schema 變更、無 migration、無刪表。`report: null` 是既有欄位的合法值。
+*   **存取模型**：本輪新增行中零個 `auth`／`token`／`login`／`server` 命中，仍為單人本地優先，恰如 PRD v3。
+*   **重複狀態**：無。`hasEvaluation()` 為純述詞，未新增任何 state 或儲存欄位。
+
+### ⚠️ 驗證限制（誠實聲明）
+審查期間瀏覽器面板持續為 `visibilityState: "hidden"`，所有 IndexedDB 非同步呼叫 30 秒逾時，應用開機甚至停在「加載中... 請稍候...」（`hydrateVault()` 未完成）。改用 localStorage 植入資料讓開機自行遷移，同樣卡住。
+
+**因此 D20 的證據來自程式碼與運算式模擬，未經畫面確認。** 證據本身充分（顯示條件與繪圖輸入都是可直接讀出的表達式），但必須說明它沒有視覺佐證。
+
+`f4f747d` 提交前那一輪確實跑過瀏覽器，但涵蓋的是「面談後的無評估完成畫面」與「混合分母」，**並未涵蓋「只有未評估紀錄時的儀表板」與「未評估紀錄的詳情彈窗」** —— 這正是 D20 漏網的原因。
+
+### ⚠️ 本輪未重新測試
+儀表板／分析頁／詳情彈窗的實際畫面、保險箱遷移與備份還原、MiniMax TTS、連續廣東話 STT、ICF 沙盒、理論學習 Hub、MI 五關卡、小組研習、成就徽章，以及真實 Gemini 金鑰端對端。
+
+### 📐 文檔同步
+*   [ARCHITECTURE.md](ARCHITECTURE.md) §7：新增「Open finding from the F1-fix peer review」小節，記錄 **D20（未解決）** 及其驗證限制。既有的 **D6／D6′、D13、D16、D17** 維持未解決。
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 6 重新標記為「對話與評估已誠實化；D20 待修 ⚠️」。
+*   [plan/06-honest-offline-demo.md](plan/06-honest-offline-demo.md)：新增 §10 記錄本次審查、三個位置的細節與驗證限制。
+
+**未更動**：`PRD.md`（產品意圖 SSOT，偏差記於本檔而非反向修改 PRD）、`DECISIONS.md` 與 `adr/`（本輪為審查，未作出新的架構決策，不虛構 ADR）。
+
+---
+
 ## [v20260829_v24_m6b] - 2026-08-29 01:00 (香港時間 UTC+8)
 
 ### 🚫 Milestone 6 補完：移除偽造的臨床評估

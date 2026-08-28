@@ -56,7 +56,7 @@ After completing a counseling session, counselors receive a 5-dimension clinical
 
 ---
 
-### Milestone 6: 誠實的離線示範 [Completed ✅]
+### Milestone 6: 誠實的離線示範 [對話與評估已誠實化；D20 待修 ⚠️]
 **帶來的價值**：  
 還沒設定金鑰的同工，第一次打開平台就處於離線示範模式。目前示範對話與真實 AI 回應在畫面上長得一模一樣，而同工自己合成的個案在離線模式下每一輪都回同一句預設台詞。此里程碑讓示範模式**看得出是示範**，並在個案沒有預設劇本時直說「此個案需要金鑰才能對話」，而不是給一段假對話。
 

@@ -171,6 +171,16 @@ Verified sound during the same review, by execution rather than assertion: the o
 
 Aggregates now exclude unevaluated sessions from the **denominator** rather than counting them as zero — verified with a mixed vault (one session scored 60 across all five dimensions plus one unevaluated): the grade came out 合格 (C) with an average of 60, not 需提升 (D) at 30.
 
+### Open finding from the F1-fix peer review (2026-08-29 02:04 HKT)
+
+| ID | Finding | Evidence |
+| :--- | :--- | :--- |
+| **D20** | **"Not evaluated" is rendered as "scored zero" in three places.** The F1 fix removed the flattering fabrication but left its mirror image: a session that was never evaluated is drawn as a zero score, which is equally untrue. (a) **Dashboard** `app.js:800-802` gates the average on `historySessions.length > 0` rather than on the evaluated count, so a counselor whose vault holds only offline demo sessions sees **「0分」** and an empty ring. (b) **Session-detail popup** `app.js:5947` onward still renders the whole radar block under the heading 「本次面談技巧評分」 using the zero-filled destructuring — a pentagon collapsed at the centre reads as "this session scored zero", not "this session was not evaluated"; only the adjacent summary text was fixed. (c) **Analytics radar** `app.js:5581`/`5732` still plots the polygon from the all-zero `state.radarScores`, though the grade line beside it does correctly read 「尚無已評估的面談紀錄」. | (a) proven by evaluating the expression with `historySessions = [{report:null}]` → renders `0分` where `—` is correct. (b) and (c) proven by reading the templates: the score block and the polygon are unconditional. **Not visually confirmed** — see the note below. |
+
+These are one defect in three locations and must be fixed in a single pass; fixing them separately would repeat the narrow-fix mistake that produced this finding. Traces to the same PRD clause as D18: presenting the counselor with a clinical conclusion that does not exist.
+
+> **Verification note**: the browser pane stayed at `visibilityState: "hidden"` throughout that review, so every asynchronous IndexedDB call timed out and the app did not finish `hydrateVault()` on boot. D20 rests on code and expression-level evidence, not on screenshots. The pre-commit round did exercise the browser, but it covered the *post-interview completion screen* and the *mixed-denominator* case — not "dashboard with only unevaluated sessions" or "detail popup of an unevaluated session", which is exactly why these slipped through.
+
 ### Confirmed sound
 
 - **Access model matches the PRD exactly** — single-user, local-first, no accounts, no server-side gate to bypass, no multi-tenant data. Nothing added beyond the PRD, nothing missing from it.

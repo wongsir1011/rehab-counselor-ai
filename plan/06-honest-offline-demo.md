@@ -1,6 +1,6 @@
 # Milestone 6 Plan: 誠實的離線示範
 
-* **Status**: Built & verified ✅（含 §9 補完；真實金鑰端對端仍待擁有者執行）
+* **Status**: 對話與評估已誠實化；**同儕審查發現 D20 待修**（見 §10）⚠️
 * **Approved**: 2026-08-28 10:43 HKT (UTC+8)
 * **Roadmap Ref**: [Product Roadmap Milestone 6](../Product_Roadmap.md)
 * **Traces to PRD v3**: `HARD CONSTRAINTS → No Fabricated Clinical Content`
@@ -192,3 +192,32 @@ PRD v3：「No canned text may ever occupy a position where the counselor would 
 | 全新分頁載入 | ✅ 主控台零輸出 |
 
 **未執行**：真實 Gemini 金鑰端對端；MiniMax TTS、連續 STT、保險箱備份還原、ICF 沙盒、理論 Hub、MI 五關卡、小組研習、成就徽章。
+
+---
+
+## 10. F1 修正的同儕審查（2026-08-29 02:04 HKT）
+
+### 重跑結果
+`check_syntax.py`、離線評估拋錯且零網路、有金鑰評估正常且 prompt 帶入對話、**M6 四條與 M5 五條回歸** —— 在目前版本全部仍然通過。
+
+### 接縫
+`hasEvaluation()` 5 個使用點；`renderSessionReport` 只有一個呼叫者，故 `renderSessionCompletedWithoutEvaluation()` 讀 `state.activeSession` 必為當前面談；`exportSessionReport` 三個呼叫點（`null`／`report`／`session.report`）皆在守衛內。彙總處以 `.filter(hasEvaluation)` 呼叫，`filter` 多傳的參數被忽略，行為正確。
+
+### 🔴 D20 — 「未評估」被呈現為「0 分」（待修）
+F1 的修正只做了一半：移除了偽造的高分，卻讓未評估的面談在三處被畫成零分。那是同一個謊的鏡像 —— 原本諂媚，現在貶低，兩者同樣不實。
+
+| 位置 | 問題 |
+| :--- | :--- |
+| 儀表板 `app.js:800-802` | 顯示條件是 `historySessions.length > 0` 而非已評估數。只做過離線示範時顯示「0分」，正確應為「—」 |
+| 詳情彈窗 `app.js:5947` 之後 | **三者中最嚴重**。標題「本次面談技巧評分」下的整個雷達區塊仍無條件渲染，未評估者畫出塌陷在圓心的五邊形。當時只改了旁邊的督導總結文字，漏了分數區塊本身 |
+| 分析頁雷達 `app.js:5581`/`5732` | 多邊形仍以全 0 的 `state.radarScores` 繪製。等第那行已正確顯示「尚無已評估的面談紀錄」，故旁邊有文字線索 |
+
+三處是同一個缺陷，須在同一次修正中一併處理。
+
+### 驗證限制（誠實聲明）
+該次審查期間瀏覽器面板持續為 `visibilityState: "hidden"`，所有 IndexedDB 非同步呼叫逾時，應用開機停在「加載中」（`hydrateVault()` 未完成）。**D20 的證據來自程式碼與運算式模擬，未經畫面確認。**
+
+提交前那一輪確實跑過瀏覽器，但涵蓋的是「面談後的完成畫面」與「混合分母」，並未涵蓋「只有未評估紀錄時的儀表板」與「未評估紀錄的詳情彈窗」—— 這正是漏網原因。
+
+### 本輪未重新測試
+儀表板／分析頁／詳情彈窗的實際畫面、保險箱遷移與備份還原、MiniMax TTS、連續 STT、ICF 沙盒、理論學習 Hub、MI 五關卡、小組研習、成就徽章、真實 Gemini 金鑰端對端。
