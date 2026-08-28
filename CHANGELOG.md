@@ -4,6 +4,43 @@
 
 ---
 
+## [v20260829_v27_prd_calibration] - 2026-08-29 03:27 (香港時間 UTC+8)
+
+本次為 PRD ↔ 程式碼校準記錄提交，**不涉及任何執行碼變更**。
+
+### 🔍 以 `PRD.md` v3 逐條校準線上程式碼
+校準基準：磁碟上的 `PRD.md` 為 **v3**（同日提出的 v4 草案**未獲批准、未寫入**，故 v3 仍是產品意圖的權威來源）。受測程式碼為 `origin/main` = `9988551`，並抓取 Vercel 部署的五個執行檔比對，**逐位元組相同**。
+
+#### ❗ SUCCESS 條款目前無法完整走通
+SUCCESS 明文包含「輔導員**中途嘗試離開頁面時被警告攔截**」，而 `beforeunload` 在 `app.js` 與 `index.html` 的命中皆為 **0**。這改變了 D6 的性質 —— 它不只是耐久性缺口，更直接擋住 PRD 自己的示範腳本。
+
+#### 新記錄的偏差
+*   **D21 — 成就徽章未自保險箱計算。** SSOT 條款把「progress milestones」列為必須自 vault 計算的衍生值，但 `rehab_unlocked_achievements` 讀寫於 `localStorage`（`app.js:40`、`472`、`6540`）。此項延伸自 D7 —— D7 只涵蓋完成場次計數與已完成個案清單。雷達彙總已於 F1 修正（三處 `filter(hasEvaluation)`），成就則未處理。
+*   **D22 — 另外兩個已上線功能不在 PRD v3 內**，與 D17 同族：三語系切換（`app.js` 內 **170 處** `state.locale` 分支）與激勵金句輪播（4 處引用）。以 `locale`／`language`／`quote`／`intervention`／`inject` 搜尋 PRD 全文，命中 **0**。依 SSOT 規則以更新 PRD 解決，不得反向刪除已上線功能。
+*   **D23 — 語意落差（非違反）**：PRD 的「staged MI practice drills」僅在「十題循序關卡」的意義上成立，題目資料內無改變階段欄位（`oars_game` 中 `stage` 與「階段」皆不存在）；ACT 自我測驗以關鍵字比對通過，惟 PRD 只要求「self-tests」未規定深度。
+
+#### 以實際檢查確認無恙
+*   **OUT OF SCOPE 五項全部未違反。** 初次 grep 的 `LMS`／`credential` 有 6 個命中，逐一檢視後確認**全為誤判** —— `miniMax`**`xApi`**`Key` 觸發了 `xapi` 樣式；兩個 `password` 命中皆為金鑰輸入框，非登入。
+*   **存取模型恰如 PRD**：無登入、無 token、無伺服器端點（除官方 AI 供應商）、無多租戶資料，既未多做也未少做。
+*   **USER JOURNEY 第 1、2、3、5 步達成**；HARD CONSTRAINTS 的 Roles & Access、Capabilities & Voice、AI Gateway & Validation 三條完全符合。
+*   **資料庫**：`DB_VERSION` 維持 1，三個 object store 全部使用中、無孤立 store 或欄位。`src/utils/db.js` 最後改動為 `97c4f6d`（保險箱建置），此後未再變更。M6 的 `history[].scripted` 與 F1 的 `report: null` 均為記錄內部選填變化，既有記錄未被改寫，**未發生刪表重建，不需 migration**。
+
+#### 阻塞級偏差全部已在路線圖內
+四項會破壞北極星或 SUCCESS 的偏差 —— 離開攔截未建置、開機可能無聲卡死、儀表板寫死雷達與無條件掌握宣稱、「已安全備份」不實聲明 —— **全部落在既有的 Milestone 7／8 範圍內。本次校準未推翻既定排序，反而確認了它。**
+
+不阻塞者：每日呼叫上限未建置（M9）、完成場次與成就未自 vault 計算（M9）、診斷日誌保存金鑰特徵（M9）、`innerHTML` 注入面（M9）、三項 PRD 未描述功能（待 PRD v4）。
+
+### 📄 PRD v4 草案已提出，待批准
+同日產出 v4 草案，納入九項待決能力（風險與危機情境、可及性基線、學習者模型與逐題作答記錄、督導提示保存並匯出、教材作者流程、AI 督導定位聲明、案主反應加入不確定性、介面語言選項處置、Phase 13 干預功能）。**未獲批准，未寫入 `PRD.md`**，故本次校準與後續工作仍以 v3 為準。
+
+### 📐 文檔同步
+*   [ARCHITECTURE.md](ARCHITECTURE.md) §7：新增「PRD v3 ↔ code calibration」小節，記錄 SUCCESS 不可達成、**D21／D22／D23**，以及本次確認無恙的項目；D6 補註其同時阻擋 SUCCESS。
+*   [Product_Roadmap.md](Product_Roadmap.md)：未變更 —— 校準確認現有排序正確，無須調整。
+
+**未更動**：`PRD.md`（v4 未獲批准，不得反向修改 v3）、`DECISIONS.md` 與 `adr/`（本輪為校準，未作出新架構決策，不虛構 ADR）、`plan/`（目前無進行中的里程碑）。
+
+---
+
 ## [v20260829_v26_roadmap_reorder] - 2026-08-29 03:14 (香港時間 UTC+8)
 
 本次為路線圖重排提交，**不涉及任何執行碼變更**。

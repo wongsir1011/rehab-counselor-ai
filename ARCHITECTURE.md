@@ -126,7 +126,7 @@ A full clause-by-clause audit of `PRD.md` against `origin/main` (`1d531a5`, byte
 | ~~D3~~ | ~~Canned supervisor hint on failure~~ | **RESOLVED (M5)**: `generateCoachHint()` deleted. Failures surface the real error and leave the panel in a neutral, non-clinical state. |
 | ~~D4~~ | ~~Hard-coded opening hint asserting "強烈的抗拒姿態" for every case~~ | **RESOLVED (M5)**: replaced with a neutral empty state making no clinical claim. Necessary because M5 makes the panel permanently visible. |
 | ~~D5~~ | ~~Offline demo returns a generic canned line when a case has no script or its script runs out, unmarked~~ | **RESOLVED (M6, 2026-08-28)**: the generic fallback is deleted. A scriptless case cannot be entered offline at all — `startRoleplaySession()` shows an explanatory panel instead — and an exhausted script says so, naming the turn count, rather than inventing dialogue. |
-| D6 | SOAP/ICF drafts live only in `state.activeSession.notes`; no `beforeunload` guard anywhere; the UI nevertheless displays a green **"已安全備份"** indicator | `app.js:3427`, `app.js:3596`, `app.js:3576-3578` | HARD CONSTRAINTS "SOAP drafts reside … in IndexedDB" |
+| D6 | SOAP/ICF drafts live only in `state.activeSession.notes`; no `beforeunload` guard anywhere (**re-verified 2026-08-29: zero occurrences in `app.js` and `index.html`, which also blocks the SUCCESS clause**); the UI nevertheless displays a green **"已安全備份"** indicator | `app.js:3427`, `app.js:3596`, `app.js:3576-3578` | HARD CONSTRAINTS "SOAP drafts reside … in IndexedDB" |
 
 ### Logged, non-blocking
 
@@ -180,6 +180,20 @@ Aggregates now exclude unevaluated sessions from the **denominator** rather than
 These are one defect in three locations and must be fixed in a single pass; fixing them separately would repeat the narrow-fix mistake that produced this finding. **Scheduled into Milestone 7「每個數字都來自你的紀錄」on 2026-08-29**, together with the hardcoded dashboard "Competence Radar", the unconditional mastery claim at the end of the MI drill, and the mismatched「知識探險家」badge — all four are the same pattern: a claim about the counselor that is not computed from their record. Traces to the same PRD clause as D18: presenting the counselor with a clinical conclusion that does not exist.
 
 > **Verification note**: the browser pane stayed at `visibilityState: "hidden"` throughout that review, so every asynchronous IndexedDB call timed out and the app did not finish `hydrateVault()` on boot. D20 rests on code and expression-level evidence, not on screenshots. The pre-commit round did exercise the browser, but it covered the *post-interview completion screen* and the *mixed-denominator* case — not "dashboard with only unevaluated sessions" or "detail popup of an unevaluated session", which is exactly why these slipped through.
+
+### PRD v3 ↔ code calibration (2026-08-29 03:27 HKT)
+
+Audited against `PRD.md` **v3** on disk — the v4 draft raised the same day was **not approved and not written**, so v3 remains the source of product truth. Code audited was `origin/main` = `9988551`, verified byte-for-byte against the five files served from the Vercel deployment.
+
+**The SUCCESS clause cannot currently be walked end to end.** It states that the counselor *"attempts to leave the page mid-interview and is stopped by a warning"*; `beforeunload` appears **zero** times in `app.js` and `index.html`. This reframes D6 — it is not only a durability gap, it blocks the PRD's own demo script.
+
+| ID | Finding | Evidence |
+| :--- | :--- | :--- |
+| **D21** | **Achievements are not computed from the vault.** The SSOT clause names *"progress milestones"* among the derived values that must be computed from the vault, but `rehab_unlocked_achievements` is read from and written to `localStorage` (`app.js:40`, `472`, `6540`). This extends D7, which covered only the session count and the completed-case id list. | Radar aggregates *were* fixed (three `filter(hasEvaluation)` sites); milestones were not. |
+| **D22** | **Two more shipped areas are absent from `PRD.md` v3**, joining D17: the three-locale switcher (**170** `state.locale` branches in `app.js`) and the motivational-quote carousel (4 references). Searching the PRD for `locale`/`language`/`quote`/`intervention`/`inject` returns **0** hits. | Resolve by updating the PRD with owner approval — never by deleting shipped features to match it. |
+| D23 | Semantic gaps rather than violations, logged for completeness: the PRD's *"staged MI practice drills"* is satisfied only in the sense of ten sequential items — the drill data carries no change-stage field (`stage`/「階段」 absent from `oars_game`); and the ACT self-test passes on keyword matching, though the PRD specifies only *"self-tests"* without depth. | Not counted as drift. |
+
+**Verified sound in the same pass**, by execution rather than assertion: no OUT OF SCOPE clause is violated — the initial `LMS`/`credential` grep returned six hits that all proved to be `miniMax**xApi**Key` matching the `xapi` pattern, and both `password` hits are the API-key input fields, not a login. The access model matches the PRD exactly. Journey steps 1, 2, 3 and 5 are met; Capabilities & Voice, AI Gateway & Validation, and Roles & Access are met in full.
 
 ### Confirmed sound
 
