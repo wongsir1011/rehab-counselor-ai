@@ -4,6 +4,43 @@
 
 ---
 
+## [v20260828_v23_m6] - 2026-08-28 10:53 (香港時間 UTC+8)
+
+### 🎭 Milestone 6 交付：誠實的離線示範
+依 [plan/06-honest-offline-demo.md](plan/06-honest-offline-demo.md) 建置。
+
+*   **刪除通用假對白**：`geminiService.js` 離線分支原本在個案沒有 `roleplay_flow` 或劇本用盡時，回傳一段寫死的「（案主低下頭，輕聲說）社工，我真係好累……」＋寫死督導提示。該段徹底移除，改為拋出兩種語意明確的狀況：個案從無劇本（`OFFLINE_NO_SCRIPT`）、劇本已播放完畢並附回合數（`OFFLINE_SCRIPT_EXHAUSTED`）。
+*   **無劇本個案於進入面談前攔截**：新增匯出的純函式 `getScriptedFlow()`，由 `geminiService` 與 `app.js` 共用同一個「有沒有劇本」的定義。`startRoleplaySession()` 開頭集中判斷，四個面談入口自動受同一規則保護；無金鑰且無劇本時不建立 session，改掛載說明面板（附「前往設定頁」與「返回個案大廳」），**不使用 alert** —— 這是常態狀況而非錯誤。
+*   **示範回合三層標示**：對話氣泡加「示範劇本」徽章與琥珀左緣（`.bubble-scripted`）；`state.activeSession.history[].scripted` 寫入會話記錄並存進保險箱；歷史詳情彈窗與 Markdown 匯出同步標示，匯出另加總體警語。**理由**：一場全程示範的面談交到督導手上時，此前與真實練習完全無法分辨。
+*   **線上模式開場白不標示**：`initial_dialogue` 是個案檔案本身的內容（PRD 使用者流程第 2 步），非偽裝成即時生成的回應；僅離線模式標示。
+*   **建置期額外修正**：劇本邊界原本沿用「對話生成失敗：…」的措辭，把正常的示範結束說成系統故障。改為由錯誤物件的 `code` 區分常態邊界與真正失敗，alert 與督導面板措辭分開處理。
+*   **刪除死碼** `refreshChatHistoryFeed()`（零呼叫者）。留著是地雷 —— 它渲染不帶示範標示的氣泡，日後被接線會靜默抹掉本里程碑的標示。
+*   **快取破除**：`index.html` 的 `app.js?v=` 與 `index.css?v=`、`app.js` 的 `geminiService.js?v=` 一併更新至 `v20260828_v22_m6`（`index.css` 自 `v20260724_v13_1` 起未曾更新，本次因新增樣式必須同步）。
+
+### 🔧 一併修正 Milestone 5 遺留回歸 D15
+督導干預指令在失敗回合後靜默遺失。`app.js` 在 API 呼叫前就清空 `promptModifiers`，而 M5 的失敗回滾又把承載該指令的孤立 history 項目 pop 掉。現於清空前保留副本，失敗回滾時放回佇列。
+
+**為何在本里程碑處理**：M6 令離線分支開始拋錯，該錯誤直接落入 D15 所在的失敗路徑，可達性大幅提高 —— 不能在明知有靜默資料遺失的路徑上疊加新流量。
+
+### ✅ 驗證 (Verification)
+*   `python3 check_syntax.py` 全數通過。
+*   **stub 隔離測試**：無劇本拋錯且零網路請求；劇本未盡正常回傳且帶 `scripted: true`；劇本用盡拋錯並正確報出回合數；`roleplay_flow` 為空陣列視同無劇本；**M5 五條回歸測試全部重跑通過**（單次呼叫、schema 注入、歷史帶入、Markdown 解析、缺欄位與空白欄位拋錯、其他四個 Gemini 函式 `responseSchema === undefined`）。
+*   **真實瀏覽器**：離線進入阿強，開場白與三回合劇本回應皆帶徽章與琥珀左緣（實測 `border-left: 3px solid rgb(245,158,11)`）；劇本用盡明確告知且未產生任何假對白氣泡，舊的「案主低下頭」確認未出現；離線點擊無劇本個案顯示說明面板且**未建立面談室**；設定金鑰後同一個案可正常進入、線上開場白不標示、離線徽章消失；**D15 回歸測試通過** —— 注入干預後觸發失敗，重試請求仍含「臨床督導即時注入指令」；匯出 Markdown 含總體警語與逐行標記；歷史詳情彈窗 3 則示範氣泡皆帶徽章；全新分頁載入主控台零輸出。
+*   ⚠️ **未執行**：真實 Gemini 金鑰端對端（線上路徑以 stub 驗證）。
+
+### 📐 文檔同步
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§3 新增離線示範路徑（2b）的實況描述；§7 標記 **D5、D14、D15 為 RESOLVED**。**D6／D6′（草稿無持久層與「已安全備份」不實聲明）、D13（每日用量上限）、D16（`innerHTML` 注入面）、D17（干預功能不在 PRD）仍未解決**。
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 5 因 D15 修正而標記 Completed；Milestone 6 標記 Completed。
+
+### 📦 變更檔案 (Files Changed)
+*   [geminiService.js](geminiService.js)：新增匯出的 `getScriptedFlow()`；離線分支移除通用假對白，改拋帶 `code` 的錯誤並於劇本回合回傳 `scripted: true`。
+*   [app.js](app.js)：新增 `renderOfflineScriptUnavailable()`；`startRoleplaySession()` 加入離線守衛；`renderChatBubble()` 新增 `opts.scripted`；開場白與劇本回合標示；`history[].scripted` 寫入；詳情彈窗與 Markdown 匯出標示；D15 修正；刪除 `refreshChatHistoryFeed()`；更新快取戳記。
+*   [index.css](index.css)：新增 `.bubble-scripted` 與 `.bubble-scripted-tag` 樣式（含淺色主題覆寫）。
+*   [index.html](index.html)：更新 `app.js` 與 `index.css` 快取戳記。
+*   [plan/06-honest-offline-demo.md](plan/06-honest-offline-demo.md)：新增，含完整驗證結果表。
+
+---
+
 ## [v20260828_v22_m5_review] - 2026-08-28 02:26 (香港時間 UTC+8)
 
 本次為同儕審查記錄提交，**不涉及任何執行碼變更**。審查對象為 `24e8a85`（Milestone 5），全程以實際執行為準，未修改程式碼。
