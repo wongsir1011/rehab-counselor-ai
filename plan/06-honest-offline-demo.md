@@ -1,6 +1,6 @@
 # Milestone 6 Plan: 誠實的離線示範
 
-* **Status**: 對話與評估已誠實化；**同儕審查發現 D20 待修**（見 §10）⚠️
+* **Status**: Completed ✅ —— 本里程碑（離線示範誠實化）範圍已完成。§10 發現的 D20 經 2026-08-29 重新排序後移交 **Milestone 7「每個數字都來自你的紀錄」**，因其屬全產品範圍的模式而非離線示範問題
 * **Approved**: 2026-08-28 10:43 HKT (UTC+8)
 * **Roadmap Ref**: [Product Roadmap Milestone 6](../Product_Roadmap.md)
 * **Traces to PRD v3**: `HARD CONSTRAINTS → No Fabricated Clinical Content`
