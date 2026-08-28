@@ -43,6 +43,19 @@ It still deliberately **omits motivational quotes** — interface garnish is not
 ## Persistence (ADR-0005)
 Storage is tiered: **session history and custom cases live in IndexedDB**; small settings (API keys, locale, voice, achievements, theory progress) stay in `localStorage`. The vault is read into `state.historySessions` / `state.cases` once during boot (`await hydrateVault()` inside `initApp()`, before the first `switchView`), so every render function can stay synchronous. Writes go through `persistCompletedSession()` / `persistCustomCases()`. See `ARCHITECTURE.md` §6.
 
+## How work is sequenced
+
+Every change follows the same rhythm, and each step gates the next:
+
+1. **Take the next milestone from `Product_Roadmap.md`** — it is the only index for what to work on.
+2. **Write `plan/NN-slug.md` before any code.** The plan states what will be built, reviews itself against the PRD (compliance, duplicate state, regressions, data-table changes), lists edge cases with decided handling, and discloses non-obvious decisions in one line. Number it to match the milestone.
+3. **Get the owner's approval.** They approve or reject the whole plan; on rejection, re-judge and produce the next one.
+4. **Build it**, then run `check_syntax.py` plus stub-level and real-browser verification. Record what was *not* verified — an honest "unverified" beats an unevidenced "works".
+5. **Peer-review the result**: re-run the last known-good flow on the current version, check seams (who else uses what changed), execute error and edge paths, and rank findings by whether they break the Northstar or the SUCCESS clause.
+6. **Update the four pillars**, then hand off for the owner to push.
+
+Milestone plans stay small — one file each, never appended into one large document. `Product_Roadmap.md` links to them.
+
 ## Commands
 Local dev server (no build step needed):
 ```bash

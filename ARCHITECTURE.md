@@ -216,3 +216,22 @@ Tightening the PRD moves the code further from it. These are deliberately record
 - **Nothing in OUT OF SCOPE is violated.** The Co-Learning Studio reads `MOCK_CO_LEARNING_CASES[0]` entirely locally — no WebSocket, WebRTC, or backend — so it is not a "multi-counselor synchronous conference room".
 - **Storage schema is clean**: three object stores (`sessions`, `custom_cases`, `app_meta`), all in use, no orphan stores. `DB_VERSION` is still 1 and `onupgradeneeded` only creates absent stores, so no destructive migration has ever run. The ADR-0005 migration verifies every source id landed in IndexedDB *before* deleting the `localStorage` copies — verified by live browser test.
 - `custom_cases` carries a latent orphan risk: `persistCustomCases()` only `put`s, never `delete`s. No delete UI exists today, so there are no orphans — but adding one without a matching delete path would strand records.
+
+---
+
+## 8. Presentation Layer: measured state (2026-08-29)
+
+Recorded because these numbers explain why visual consistency is expensive to maintain, and because they are not visible from any single file.
+
+**Styles live mostly outside the stylesheet.** `app.js` carries **806** inline `style="…"` attributes against **672** `class` attributes, while `index.css` defines **366** class selectors. **187** of those inline styles exceed 100 characters (longest 524). Most visual decisions are therefore made inside template literals rather than in a stylesheet.
+
+Two consequences follow directly:
+
+1. **No scale can hold.** Across `app.js` and `index.css` there are **418** `font-size` declarations using **45 distinct sizes**; **219 of them — over half — sit between 0.70rem and 0.85rem**, six steps inside a 2.4px range, which cannot express hierarchy. Spacing uses **20** distinct px values (including 1, 2, 3, 5, 7px), border-radius **11**, and there are **6** ad-hoc breakpoints (420/500/650/768/900/950px).
+2. **The light theme cannot fully apply.** Inline styles outrank any selector, and **155** colour literals are hardcoded inside them (most frequently `rgba(255,255,255,0.02)` and `rgba(255,255,255,0.05)`, 11 times each — white surface tints that create depth on a dark ground and vanish on a light one). `index.css` carries only **34** `[data-theme="light"]` override rules against 366 class selectors. Inline styles do also use design tokens — **566** `var(--…)` references — so the escape hatch is the exception, not the rule.
+
+**Motion and focus**: **26** `@keyframes` with **0** `prefers-reduced-motion` handling; 9 `:focus` rules but no `:focus-visible`.
+
+The token layer itself is sound: **32** CSS variables (14 accent, 10 nested surface, 6 text, 6 illustration, 5 card, 4 shadow, 4 background, 1 transition). The problem is not the absence of tokens, it is that half the interface does not go through them.
+
+> Treated as internal engineering, not a milestone: `Product_Roadmap.md` records that this is absorbed into whichever milestone touches a given screen.
