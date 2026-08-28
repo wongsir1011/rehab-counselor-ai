@@ -3843,3 +3843,34 @@ body {
 
 
 
+
+/* ==========================================================================
+   M6：離線示範劇本標示
+   示範對白必須與真實 AI 回應一眼可分。用左緣實線與低飽和琥珀底色作區隔，
+   刻意不加動畫或發光 —— 這是狀態標示，不是要搶注意力的裝飾。
+   ========================================================================== */
+.chat-bubble.bubble-scripted {
+  border-left: 3px solid var(--accent-amber);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.bubble-scripted-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--accent-amber);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+[data-theme="light"] .chat-bubble.bubble-scripted {
+  background: rgba(245, 158, 11, 0.08);
+}

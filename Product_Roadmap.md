@@ -43,7 +43,7 @@ After completing a counseling session, counselors receive a 5-dimension clinical
 
 ---
 
-### Milestone 5: 同一口氣的雙軌回應 [已建置，同儕審查發現回歸待修 ⚠️]
+### Milestone 5: 同一口氣的雙軌回應 [Completed ✅]
 **帶來的價值**：  
 同工說完一句話之後，案主的廣東話回應與督導提示**一起出現**，而不是先等案主講完、再等督導分析。等待時間減半，對話節奏終於接近真實面談 —— 這正是 Milestone 2 承諾卻尚未兌現的那一半。同時，督導提示不再可能是預先寫好的罐頭文字：拿不到真正的 AI 分析時，系統會直接說明失敗原因。
 
@@ -51,17 +51,18 @@ After completing a counseling session, counselors receive a 5-dimension clinical
 *Traces to PRD: SUCCESS, HARD CONSTRAINTS (AI Gateway & Validation)*  
 *Plan*: [`plan/05-synchronous-dual-track-response.md`](plan/05-synchronous-dual-track-response.md) — 已批准 2026-08-27 23:36 HKT，建置於 `24e8a85`  
 
-**未完成**：2026-08-28 02:26 HKT 同儕審查以 A/B 實測發現本里程碑自身引入一項回歸（`ARCHITECTURE.md` §7 **D15**）—— 督導干預指令在失敗回合後靜默遺失。修正前本里程碑不算交付。真實金鑰端對端驗證亦尚未執行。  
+**D15 已修正**：同儕審查發現的回歸（督導干預指令在失敗回合後靜默遺失）已於 Milestone 6 一併修正並實測通過 —— 失敗回滾現在會把干預指令放回佇列。真實金鑰端對端驗證仍待擁有者執行。  
 *相關決策*：[ADR-0002](adr/0002-unified-structured-gemini-schema.md)
 
 ---
 
-### Milestone 6: 誠實的離線示範
+### Milestone 6: 誠實的離線示範 [對話與評估已誠實化；D20 待修 ⚠️]
 **帶來的價值**：  
 還沒設定金鑰的同工，第一次打開平台就處於離線示範模式。目前示範對話與真實 AI 回應在畫面上長得一模一樣，而同工自己合成的個案在離線模式下每一輪都回同一句預設台詞。此里程碑讓示範模式**看得出是示範**，並在個案沒有預設劇本時直說「此個案需要金鑰才能對話」，而不是給一段假對話。
 
 **為何排在這裡**：離線模式是新同工的第一印象。Milestone 5 讓真實回應變快之後，示範與真實的差別更需要能被一眼分辨。  
-*Traces to PRD: HARD CONSTRAINTS (AI Gateway & Validation — no fake data)*
+*Traces to PRD: HARD CONSTRAINTS (No Fabricated Clinical Content)*  
+*Plan*: [`plan/06-honest-offline-demo.md`](plan/06-honest-offline-demo.md) — 已批准 2026-08-28 10:43 HKT
 
 ---
 

@@ -1,7 +1,7 @@
 // RehabCounselor AI - 主應用控制器 (Vanilla SPA Engine)
 
 import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260724_v13_1";
-import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions } from "./geminiService.js?v=20260828_v21_m5";
+import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions, getScriptedFlow } from "./geminiService.js?v=20260828_v23_m6b";
 import { RehabCounselorDB } from "./src/utils/db.js?v=20260827_v18_adr0005";
 
 // Global App State
@@ -338,6 +338,15 @@ function initLocaleAndSound() {
 // 註：舊版此處硬編碼為 ["case_01".."case_04"]，遺漏了後來新增的三個內建個案，
 // 導致它們被誤當自定義個案存入保險箱，開機後與 MOCK_CASES 重複出現兩次。
 const BUILTIN_CASE_IDS = new Set(MOCK_CASES.map(c => c.id));
+
+/**
+ * 這場面談是否帶有 AI 臨床評估。
+ * 離線示範模式沒有 AI，因此沒有評估（`report === null`）；PRD v3 不容許以罐頭
+ * 評分充數。所有讀取評分的地方共用此述詞，避免出現多套判斷。
+ */
+function hasEvaluation(session) {
+  return !!(session && session.report && session.report.scores);
+}
 
 function getCustomCases() {
   return state.cases.filter(c => c && !BUILTIN_CASE_IDS.has(c.id));
@@ -717,12 +726,14 @@ function renderDashboard(container) {
 
   let avgScore = 0;
   let beatsPercent = 0;
-  if (historySessions.length > 0) {
-    const sum = historySessions.reduce((acc, s) => {
+  // 未評估（離線示範）的面談排除於分母之外 —— 以 0 計入會靜默拉低同工的真實統計。
+  const evaluatedSessions = historySessions.filter(hasEvaluation);
+  if (evaluatedSessions.length > 0) {
+    const sum = evaluatedSessions.reduce((acc, s) => {
       const avg = Math.round((s.report.scores.empathy + s.report.scores.changeTalk + s.report.scores.actFlexibility + s.report.scores.icfAccuracy + s.report.scores.actionPlanning) / 5);
       return acc + avg;
     }, 0);
-    avgScore = Math.round(sum / historySessions.length);
+    avgScore = Math.round(sum / evaluatedSessions.length);
     beatsPercent = Math.min(99, Math.round(avgScore * 1.1 - 5));
     if (beatsPercent < 0) beatsPercent = 0;
   }
@@ -3291,7 +3302,68 @@ function renderCaseGenerator(container) {
 /* ==========================================================================
    View 4: LIVE 廣東話模擬輔導室 (Roleplay Simulator)
    ========================================================================== */
+/**
+ * M6：無金鑰且個案沒有預設劇本時，取代面談室的說明狀態。
+ * 這是常態情況而非錯誤，因此以正式的介面狀態呈現，不用 alert。
+ */
+function renderOfflineScriptUnavailable(selectedCase) {
+  state.activeView = "roleplay";
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+
+  const title = document.getElementById("view-title");
+  const subtitle = document.getElementById("view-subtitle");
+  if (title) title.textContent = `離線示範模式：${selectedCase.name}`;
+  if (subtitle) subtitle.textContent = `此個案未附示範劇本，需要配置 AI 金鑰才能進行對話。`;
+
+  const mount = document.getElementById("content-view-mount");
+  mount.innerHTML = `
+    <div class="glass-card" style="max-width:620px; margin:40px auto; padding:32px; display:flex; flex-direction:column; gap:18px; text-align:center; align-items:center;">
+      <div style="font-size:2.6rem; line-height:1;">${selectedCase.avatar || "👤"}</div>
+      <div>
+        <h3 style="font-size:1.1rem; font-weight:800; color:var(--text-bright); margin-bottom:6px;">${selectedCase.name} 未附示範劇本</h3>
+        <p style="font-size:0.86rem; color:var(--text-muted); line-height:1.7;">
+          你目前處於<b style="color:var(--accent-amber);">離線示範模式（未配置 API 金鑰）</b>。<br>
+          離線模式只能播放個案自帶的預設劇本，而此個案沒有。<br>
+          本平台不會以預先寫好的通用對白冒充案主回應，因此無法在此模式下與他對話。
+        </p>
+      </div>
+      <div style="background:rgba(245,158,11,0.06); border:1px dashed rgba(245,158,11,0.3); border-radius:8px; padding:12px 16px; font-size:0.78rem; color:var(--text-main); line-height:1.6; text-align:left;">
+        <i class="fa-solid fa-key" style="color:var(--accent-amber);"></i>
+        於「系統設定」輸入 Google Gemini API 金鑰後，即可與<b>任何個案</b>（包括你自行合成的個案）進行真實 AI 廣東話對話。
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:center;">
+        <button class="btn btn-primary" id="offline-goto-settings-btn"><i class="fa-solid fa-gear"></i> 前往設定頁配置金鑰</button>
+        <button class="btn" id="offline-back-to-arena-btn" style="background:var(--nested-bg-medium); border:1px solid var(--card-border); color:var(--text-bright);"><i class="fa-solid fa-arrow-left"></i> 返回個案大廳</button>
+      </div>
+    </div>
+  `;
+
+  const gotoSettings = document.getElementById("offline-goto-settings-btn");
+  if (gotoSettings) {
+    gotoSettings.addEventListener("click", () => {
+      AudioSynth.playClick();
+      const link = document.querySelector('.nav-item[data-target="settings"]');
+      if (link) link.click();
+    });
+  }
+  const backToArena = document.getElementById("offline-back-to-arena-btn");
+  if (backToArena) {
+    backToArena.addEventListener("click", () => {
+      AudioSynth.playClick();
+      switchView("arena");
+    });
+  }
+}
+
 function startRoleplaySession(selectedCase) {
+  // M6：無金鑰的離線示範模式只能播放個案自帶的劇本。沒有劇本就不能對話，
+  // 也不得以假對白充數（PRD v3: No Fabricated Clinical Content）。
+  // 集中在此判斷，四個進入面談的入口自動受同一條規則保護。
+  if (!state.apiKey && getScriptedFlow(selectedCase).length === 0) {
+    renderOfflineScriptUnavailable(selectedCase);
+    return;
+  }
+
   state.activeCase = selectedCase;
   state.activeSession = {
     history: [],
@@ -3529,7 +3601,9 @@ function startRoleplaySession(selectedCase) {
   `;
 
   // Mount Initial Chat Bubbles
-  const initBubble = renderChatBubble("ai", selectedCase.initial_dialogue);
+  // 離線模式下開場白同屬預設劇本內容，須一併標示；線上模式它是個案檔案本身
+  // 的開場設定，其後回合才是即時生成，故不標示。
+  const initBubble = renderChatBubble("ai", selectedCase.initial_dialogue, { scripted: !state.apiKey });
   speakCantonese(selectedCase.initial_dialogue, initBubble);
 
   // Auto focus input console for rapid dictation or typing
@@ -3683,30 +3757,24 @@ function startRoleplaySession(selectedCase) {
 
 
 
-function refreshChatHistoryFeed() {
-  const chatFeed = document.getElementById("rp-chat-history");
-  if (!chatFeed) return;
-  chatFeed.innerHTML = "";
-  
-  // Render Initial Cases Dialogue
-  renderChatBubble("ai", state.activeCase.initial_dialogue);
-  
-  // Render rest of dialogue history
-  state.activeSession.history.forEach(msg => {
-    renderChatBubble(msg.role === "user" ? "user" : "ai", msg.text);
-  });
-}
-
-function renderChatBubble(sender, text) {
+function renderChatBubble(sender, text, opts = {}) {
   const chatFeed = document.getElementById("rp-chat-history");
   if (!chatFeed) return null;
 
   const bubble = document.createElement("div");
-  bubble.className = `chat-bubble bubble-${sender}`;
+  bubble.className = `chat-bubble bubble-${sender}${opts.scripted ? " bubble-scripted" : ""}`;
   
   const meta = document.createElement("div");
   meta.className = "bubble-meta";
   meta.textContent = sender === "user" ? "輔導員 (You)" : `案主 ${state.activeCase.name}`;
+
+  // M6：離線示範的每一則對白都必須看得出是劇本，不可與真實 AI 回應混淆。
+  if (opts.scripted) {
+    const tag = document.createElement("span");
+    tag.className = "bubble-scripted-tag";
+    tag.innerHTML = `<i class="fa-solid fa-clapperboard"></i> 示範劇本`;
+    meta.appendChild(tag);
+  }
 
   if (sender === "ai") {
     const replayBtn = document.createElement("button");
@@ -3748,6 +3816,9 @@ async function submitMessageToAI(text) {
   state.activeSession.history.push({ role: "user", text: text });
 
   // 注入已產生的即時干預指令 (Phase 13 督導對弈)
+  // D15：先保留副本。清空發生在 API 呼叫之前，若該回合失敗而不還原，
+  // 同工的干預指令會在重試時靜默消失（M5 引入的回歸）。
+  const queuedModifiers = (state.activeSession.promptModifiers || []).slice();
   let apiUserText = text;
   if (state.activeSession.promptModifiers && state.activeSession.promptModifiers.length > 0) {
     const modifiersText = state.activeSession.promptModifiers.join("\n");
@@ -3781,7 +3852,7 @@ async function submitMessageToAI(text) {
     // 3. Call Gemini / Mock reply
     // Prepare conversation history context for API (excluding the latest user turn)
     const historyContext = state.activeSession.history.slice(0, -1);
-    const { reply, coachHint } = await generateClientReply(
+    const { reply, coachHint, scripted } = await generateClientReply(
       state.apiKey,
       state.selectedModel,
       state.activeCase,
@@ -3796,8 +3867,11 @@ async function submitMessageToAI(text) {
     }
 
     // 4. Add reply to history & render bubble
-    state.activeSession.history.push({ role: "model", text: reply });
-    const bubbleEl = renderChatBubble("ai", reply);
+    //    scripted 一併寫入會話記錄，令匯出給督導的報告能分辨示範與真實練習。
+    const modelEntry = { role: "model", text: reply };
+    if (scripted) modelEntry.scripted = true;
+    state.activeSession.history.push(modelEntry);
+    const bubbleEl = renderChatBubble("ai", reply, { scripted: !!scripted });
 
     // 5. Trigger Cantonese TTS Synthesis
     speakCantonese(reply, bubbleEl);
@@ -3834,17 +3908,32 @@ async function submitMessageToAI(text) {
       inputEl.value = text;
     }
 
+    // D15：把干預指令放回佇列，讓重試仍然帶著同工原本注入的臨床指令。
+    if (queuedModifiers.length > 0) {
+      state.activeSession.promptModifiers = queuedModifiers.concat(state.activeSession.promptModifiers || []);
+    }
+
+    // 離線示範的劇本邊界是常態狀況，不是失敗；措辭必須誠實區分，
+    // 否則把正常的「示範播完了」講成系統故障，同樣是誤導。
+    const isDemoBoundary = error.code === "OFFLINE_NO_SCRIPT" || error.code === "OFFLINE_SCRIPT_EXHAUSTED";
+
     // 面板改為中性狀態，不留上一回合的分析假裝成本回合的結果，也不填任何臨床內容。
     const coachFeedback = document.getElementById("rp-coach-feedback");
     if (coachFeedback) {
-      coachFeedback.textContent = state.locale === "en"
-        ? "No supervisor analysis for this turn — the request failed. Your message has been returned to the input box; please try again."
-        : "本回合未取得督導分析（請求失敗）。你的發言已放回輸入框，可直接重試。";
+      if (isDemoBoundary) {
+        coachFeedback.textContent = state.locale === "en"
+          ? "Demo script finished — no supervisor analysis for this turn. Add an API key in Settings to continue with real AI dialogue."
+          : "示範劇本到此為止，本回合沒有督導分析。於「系統設定」配置 API 金鑰後即可繼續真實 AI 對話。";
+      } else {
+        coachFeedback.textContent = state.locale === "en"
+          ? "No supervisor analysis for this turn — the request failed. Your message has been returned to the input box; please try again."
+          : "本回合未取得督導分析（請求失敗）。你的發言已放回輸入框，可直接重試。";
+      }
       coachFeedback.style.color = "var(--text-muted)";
       setCoachPanelVisible(true);
     }
 
-    alert(`對話生成失敗：${error.message}`);
+    alert(isDemoBoundary ? error.message : `對話生成失敗：${error.message}`);
   }
 }
 
@@ -4349,8 +4438,22 @@ async function endRoleplaySession() {
     </div>
   `;
 
+  // 離線示範模式沒有 AI，因此沒有臨床評估 —— 但逐字紀錄與 SOAP／ICF 日誌是同工
+  // 的真實工作產物，不能因為缺少評分就整場丟棄。故此處只在「有金鑰卻失敗」時中止。
+  let report = null;
   try {
-    const report = await generateSessionReport(state.apiKey, state.selectedModel, state.activeCase, state.activeSession.history);
+    report = await generateSessionReport(state.apiKey, state.selectedModel, state.activeCase, state.activeSession.history);
+  } catch (error) {
+    if (error.code !== "OFFLINE_NO_EVALUATION") {
+      AudioSynth.playError();
+      alert(`評估報告生成失敗：${error.message}`);
+      switchView("arena");
+      return;
+    }
+    // 離線：report 維持 null，往下照常保存面談本身。
+  }
+
+  try {
     state.activeSession.report = report;
     
     // Save progression stats to LocalStorage (Phase 4)
@@ -4383,7 +4486,7 @@ async function endRoleplaySession() {
     
     // Trigger Achievements Check
     checkAndUnlockAchievements("first_session");
-    if (report.scores.empathy >= 90) {
+    if (hasEvaluation({ report }) && report.scores.empathy >= 90) {
       checkAndUnlockAchievements("empathy_master");
     }
     if (state.completedCaseIds.length >= 3) {
@@ -4398,8 +4501,75 @@ async function endRoleplaySession() {
   }
 }
 
+/**
+ * 離線示範模式完成面談後的畫面。
+ * 只呈現真實存在的內容：逐字回顧與同工自己撰寫的日誌。
+ * 不畫雷達、不給等第、不編臨床總結 —— 沒有 AI 就沒有 AI 評估。
+ */
+function renderSessionCompletedWithoutEvaluation(container) {
+  const title = document.getElementById("view-title");
+  if (title) title.textContent = `面談已完成：${state.activeCase.name}`;
+
+  const historyText = state.activeSession.history
+    .map(h => `${h.role === "user" ? "輔導員" : "案主"}${h.scripted ? "［示範劇本］" : ""}：${h.text}`)
+    .join("\n");
+  const notes = state.activeSession.notes || {};
+
+  container.innerHTML = `
+    <div class="glass-card" style="max-width:820px; margin:0 auto; padding:28px; display:flex; flex-direction:column; gap:20px;">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <h3 style="font-size:1.15rem; font-weight:800; color:var(--text-bright);">面談已完成並存入保險箱</h3>
+        <span style="font-size:0.66rem; font-weight:800; letter-spacing:0.3px; color:var(--accent-amber); background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); padding:2px 7px; border-radius:5px; white-space:nowrap;"><i class="fa-solid fa-clapperboard"></i> 離線示範</span>
+      </div>
+
+      <div style="background:rgba(245,158,11,0.06); border:1px dashed rgba(245,158,11,0.3); border-radius:8px; padding:14px 16px; font-size:0.82rem; color:var(--text-main); line-height:1.7;">
+        <b style="color:var(--accent-amber);">本次沒有臨床評估。</b>
+        離線示範模式沒有 AI 參與，因此沒有雷達評分，也沒有督導總結 ——
+        本平台不會用預先寫好的分數與評語冒充 AI 評估。<br>
+        你剛才的逐字對話與面談日誌<b>已完整保存</b>，可在「學習分析」查閱或匯出。
+        於「系統設定」配置 Gemini API 金鑰後，往後的面談即可獲得真實的五維評分與督導總結。
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <h4 style="font-size:0.88rem; font-weight:800; color:var(--text-bright);"><i class="fa-solid fa-comments"></i> 逐字對話回顧</h4>
+        <pre style="font-family:inherit; font-size:0.8rem; color:var(--text-main); white-space:pre-wrap; line-height:1.7; background:var(--nested-bg-medium); padding:14px; border-radius:8px; max-height:280px; overflow-y:auto;">${historyText}</pre>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <h4 style="font-size:0.88rem; font-weight:800; color:var(--text-bright);"><i class="fa-solid fa-pen-nib"></i> 面談日誌記錄</h4>
+        <pre style="font-family:inherit; font-size:0.8rem; color:var(--text-main); white-space:pre-wrap; line-height:1.7; background:var(--nested-bg-medium); padding:14px; border-radius:8px; max-height:220px; overflow-y:auto;">${notes.soap || notes.icf || "（本次面談未撰寫日誌記錄）"}</pre>
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-cyan" id="rp-noeval-export-btn"><i class="fa-solid fa-download"></i> 匯出面談日誌</button>
+        <button class="btn" id="rp-noeval-settings-btn" style="background:var(--nested-bg-medium); border:1px solid var(--card-border); color:var(--text-bright);"><i class="fa-solid fa-gear"></i> 前往設定頁配置金鑰</button>
+        <button class="btn" id="rp-noeval-back-btn" style="background:var(--nested-bg-medium); border:1px solid var(--card-border); color:var(--text-bright);">返回個案實戰</button>
+      </div>
+    </div>
+  `;
+
+  const exportBtn = document.getElementById("rp-noeval-export-btn");
+  if (exportBtn) exportBtn.addEventListener("click", () => { AudioSynth.playClick(); exportSessionReport(null); });
+  const settingsBtn = document.getElementById("rp-noeval-settings-btn");
+  if (settingsBtn) settingsBtn.addEventListener("click", () => {
+    AudioSynth.playClick();
+    const link = document.querySelector('.nav-item[data-target="settings"]');
+    if (link) link.click();
+  });
+  const backBtn = document.getElementById("rp-noeval-back-btn");
+  if (backBtn) backBtn.addEventListener("click", () => { AudioSynth.playClick(); switchView("arena"); });
+}
+
 function renderSessionReport(container, report) {
   const title = document.getElementById("view-title");
+
+  // 離線示範模式沒有 AI，因此沒有臨床評估。此處不畫雷達、不給等第、不編總結，
+  // 只呈現真實存在的東西：逐字紀錄與同工自己寫的日誌。
+  if (!hasEvaluation({ report })) {
+    renderSessionCompletedWithoutEvaluation(container);
+    return;
+  }
+
   title.textContent = `輔導能力評審報告：${state.activeCase.name}`;
 
   const { empathy, changeTalk, actFlexibility, icfAccuracy, actionPlanning } = report.scores;
@@ -5153,7 +5323,7 @@ function generateLongitudinalChartHTML(historySessions) {
       ];
     }
   } else {
-    dataPoints = historySessions.map((session, index) => {
+    dataPoints = historySessions.filter(hasEvaluation).map((session, index) => {
       const s = session.report.scores;
       const avg = Math.round((s.empathy + s.changeTalk + s.actFlexibility + s.icfAccuracy + s.actionPlanning) / 5);
       return {
@@ -5373,10 +5543,12 @@ function renderAnalytics(container) {
   let defusionSum = 0;
   let icfSum = 0;
   let actionSum = 0;
-  const totalSessions = historySessions.length;
+  // 只有帶 AI 評估的面談才計入雷達平均；離線示範沒有評估，不能當作 0 分拉低平均。
+  const evaluatedSessions = historySessions.filter(hasEvaluation);
+  const totalSessions = evaluatedSessions.length;
 
   if (totalSessions > 0) {
-    historySessions.forEach(s => {
+    evaluatedSessions.forEach(s => {
       empathySum += s.report.scores.empathy || 0;
       changeTalkSum += s.report.scores.changeTalk || 0;
       defusionSum += s.report.scores.actFlexibility || 0;
@@ -5391,15 +5563,12 @@ function renderAnalytics(container) {
       action: Math.round(actionSum / totalSessions)
     };
   } else {
-    // Default fallback scores for guided display
-    state.radarScores = {
-      empathy: 75,
-      changeTalk: 60,
-      defusion: 80,
-      icf: 45,
-      action: 65
-    };
+    // 尚無已評估的面談。舊版在此塞入 75/60/80/45/65 並據此給出等第，
+    // 令從未做過面談的同工看到「優良 (B+)」—— 那是把寫死的分數當成他自己的
+    // 成績呈現，屬 PRD v3「No Fabricated Clinical Content」禁止之列。
+    state.radarScores = { empathy: 0, changeTalk: 0, defusion: 0, icf: 0, action: 0 };
   }
+  const hasRadarData = totalSessions > 0;
 
   // Calculate SVG dynamic coordinate polygon vertices (center: 100,100; max radius: 80px)
   const scores = state.radarScores;
@@ -5412,9 +5581,10 @@ function renderAnalytics(container) {
   const pointsStr = `${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y} ${p4.x},${p4.y} ${p5.x},${p5.y}`;
 
   // Calculate dynamic cumulative grade rating
-  const totalAvg = Math.round((scores.empathy + scores.changeTalk + scores.defusion + scores.icf + scores.action) / 5);
+  const totalAvg = hasRadarData ? Math.round((scores.empathy + scores.changeTalk + scores.defusion + scores.icf + scores.action) / 5) : 0;
   let gradeText = "";
-  if (totalAvg >= 85) gradeText = state.locale === "en" ? "Expert (A)" : "卓越 (A)";
+  if (!hasRadarData) gradeText = state.locale === "en" ? "No evaluated sessions yet" : "尚無已評估的面談紀錄";
+  else if (totalAvg >= 85) gradeText = state.locale === "en" ? "Expert (A)" : "卓越 (A)";
   else if (totalAvg >= 70) gradeText = state.locale === "en" ? "Good (B+)" : "優良 (B+)";
   else if (totalAvg >= 55) gradeText = state.locale === "en" ? "Competent (C)" : "合格 (C)";
   else gradeText = state.locale === "en" ? "Developing (D)" : "需提升 (D)";
@@ -5432,7 +5602,8 @@ function renderAnalytics(container) {
     historyMarkup = `
       <div class="history-grid">
         ${historySessions.map(session => {
-          const avgScore = Math.round((session.report.scores.empathy + session.report.scores.changeTalk + session.report.scores.actFlexibility + session.report.scores.icfAccuracy + session.report.scores.actionPlanning) / 5);
+          const evaluated = hasEvaluation(session);
+          const avgScore = evaluated ? Math.round((session.report.scores.empathy + session.report.scores.changeTalk + session.report.scores.actFlexibility + session.report.scores.icfAccuracy + session.report.scores.actionPlanning) / 5) : null;
           return `
             <div class="history-card" data-session-id="${session.id}">
               <div class="history-card-header">
@@ -5442,9 +5613,15 @@ function renderAnalytics(container) {
               <div class="history-card-name">${session.caseName}</div>
               <div class="history-card-diag">${session.caseDiagnostic}</div>
               <div class="history-card-scores">
-                <span class="history-score-tag high">${state.locale === "en" ? "Avg" : "平均"} ${avgScore}分</span>
-                <span class="history-score-tag">${state.locale === "en" ? "Empathy" : "同理"} ${session.report.scores.empathy}</span>
-                <span class="history-score-tag">${state.locale === "en" ? "ACT" : "彈性"} ${session.report.scores.actFlexibility}</span>
+                ${evaluated ? `
+                  <span class="history-score-tag high">${state.locale === "en" ? "Avg" : "平均"} ${avgScore}分</span>
+                  <span class="history-score-tag">${state.locale === "en" ? "Empathy" : "同理"} ${session.report.scores.empathy}</span>
+                  <span class="history-score-tag">${state.locale === "en" ? "ACT" : "彈性"} ${session.report.scores.actFlexibility}</span>
+                ` : `
+                  <span class="history-score-tag" style="border-color:rgba(245,158,11,0.4); color:var(--accent-amber); background:rgba(245,158,11,0.1);">
+                    <i class="fa-solid fa-clapperboard"></i> ${state.locale === "en" ? "Demo — not evaluated" : "離線示範 · 未評估"}
+                  </span>
+                `}
               </div>
             </div>
           `;
@@ -5767,7 +5944,9 @@ function showSessionDetailPopup(session) {
     document.body.appendChild(overlay);
   }
 
-  const { empathy, changeTalk, actFlexibility, icfAccuracy, actionPlanning } = session.report.scores;
+  const evaluated = hasEvaluation(session);
+  const { empathy, changeTalk, actFlexibility, icfAccuracy, actionPlanning } =
+    evaluated ? session.report.scores : { empathy: 0, changeTalk: 0, actFlexibility: 0, icfAccuracy: 0, actionPlanning: 0 };
   
   // Render full detailed portfolio
   overlay.innerHTML = `
@@ -5864,7 +6043,11 @@ function showSessionDetailPopup(session) {
                 <i class="fa-solid fa-user-tie" style="color:var(--accent-cyan);"></i> ${state.locale === "en" ? "Clinical Summary Feedback" : "督導意見總結"}
               </h4>
               <p style="font-size:0.8rem; color:var(--text-main); line-height:1.6; background:var(--nested-bg-faint); padding:12px; border-radius:8px; border-left:4px solid var(--accent-cyan); max-height:220px; overflow-y:auto;">
-                ${session.report.summary.replace(/\n/g, "<br>")}
+                ${evaluated
+                  ? session.report.summary.replace(/\n/g, "<br>")
+                  : (state.locale === "en"
+                      ? "This session ran in offline demo mode, so there is no AI clinical evaluation — no scores and no supervisor summary. The transcript and notes above are real."
+                      : "本次面談在<b>離線示範模式</b>下進行，沒有 AI 臨床評估，因此沒有評分與督導總結。上方的逐字紀錄與日誌為真實內容。")}
               </p>
             </div>
           </div>
@@ -5876,8 +6059,8 @@ function showSessionDetailPopup(session) {
             ${session.history.map(msg => {
               const isUser = msg.role === "user";
               return `
-                <div class="chat-bubble ${isUser ? 'bubble-user' : 'bubble-assistant'}" style="margin: 4px 0; max-width: 80%; ${isUser ? 'align-self: flex-end;' : 'align-self: flex-start;'}">
-                  <div class="bubble-meta">${isUser ? (state.locale === "en" ? "Rehab Staff" : "諮商師(你)") : session.caseName}</div>
+                <div class="chat-bubble ${isUser ? 'bubble-user' : 'bubble-assistant'}${msg.scripted ? ' bubble-scripted' : ''}" style="margin: 4px 0; max-width: 80%; ${isUser ? 'align-self: flex-end;' : 'align-self: flex-start;'}">
+                  <div class="bubble-meta">${isUser ? (state.locale === "en" ? "Rehab Staff" : "諮商師(你)") : session.caseName}${msg.scripted ? `<span class="bubble-scripted-tag"><i class="fa-solid fa-clapperboard"></i> 示範劇本</span>` : ""}</div>
                   <div class="bubble-text" style="font-size:0.85rem; line-height:1.5;">${msg.text}</div>
                 </div>
               `;
@@ -6654,7 +6837,13 @@ function initVoiceRecognition(inputEl) {
 function exportSessionReport(report, historicalSession = null) {
   const caseName = historicalSession ? historicalSession.caseName : (state.activeCase ? state.activeCase.name : "未知個案");
   const historyData = historicalSession ? historicalSession.history : (state.activeSession ? state.activeSession.history : []);
-  const historyText = historyData.map(h => `${h.role === "user" ? "輔導員" : "案主"}: ${h.text}`).join("\n");
+  // M6：示範劇本回合逐行標記，避免督導把離線示範誤讀為真實練習紀錄。
+  const historyText = historyData.map(h => {
+    const who = h.role === "user" ? "輔導員" : "案主";
+    const tag = h.scripted ? "［示範劇本］" : "";
+    return `${who}${tag}: ${h.text}`;
+  }).join("\n");
+  const hasScripted = historyData.some(h => h.scripted);
   
   const notesObj = historicalSession ? historicalSession.notes : (state.activeSession ? state.activeSession.notes : {});
   const soapNotes = (notesObj && notesObj.soap) || "（未填寫 SOAP 記錄）";
@@ -6667,18 +6856,23 @@ function exportSessionReport(report, historicalSession = null) {
     `案主姓名：${caseName}\n` +
     `就業診斷：${diagnostic}\n` +
     `評估日期：${dateStr}\n\n` +
-    `## 📊 督導評估成績\n` +
-    `- 同理心與反映式傾聽 (MI OARS)：${report.scores.empathy} 分\n` +
-    `- 激發改變性談話 (MI Change Talk)：${report.scores.changeTalk} 分\n` +
-    `- 心理彈性引導 (ACT Hexaflex)：${report.scores.actFlexibility} 分\n` +
-    `- 全人障礙與環境評估 (ICF Matrix)：${report.scores.icfAccuracy} 分\n` +
-    `- 承諾行動計劃可行性：${report.scores.actionPlanning} 分\n\n` +
-    `## 💬 臨床督導總結 (Supervisor Feedback)\n` +
-    `${report.summary}\n\n` +
+    (hasEvaluation({ report })
+      ? `## 📊 督導評估成績\n` +
+        `- 同理心與反映式傾聽 (MI OARS)：${report.scores.empathy} 分\n` +
+        `- 激發改變性談話 (MI Change Talk)：${report.scores.changeTalk} 分\n` +
+        `- 心理彈性引導 (ACT Hexaflex)：${report.scores.actFlexibility} 分\n` +
+        `- 全人障礙與環境評估 (ICF Matrix)：${report.scores.icfAccuracy} 分\n` +
+        `- 承諾行動計劃可行性：${report.scores.actionPlanning} 分\n\n` +
+        `## 💬 臨床督導總結 (Supervisor Feedback)\n` +
+        `${report.summary}\n\n`
+      : `## 📊 督導評估成績\n` +
+        `本次面談在**離線示範模式**下進行，沒有 AI 臨床評估，因此沒有評分與督導總結。\n` +
+        `以下的逐字紀錄與面談日誌為真實內容。\n\n`) +
     `## 📝 同工面談日誌記錄\n` +
     `### SOAP 日誌：\n${soapNotes}\n\n` +
     `### ICF 臨床評估表：\n${icfNotes}\n\n` +
     `## 🗣️ 面談歷史對話回顧\n` +
+    (hasScripted ? `> ⚠️ 本次面談部分或全部回合來自「離線示範劇本」，並非真實 AI 生成的案主回應，標記為［示範劇本］。\n\n` : "") +
     `${historyText}\n`;
 
   const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });

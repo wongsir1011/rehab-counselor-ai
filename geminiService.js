@@ -169,27 +169,44 @@ function parseFlexibleJson(rawText) {
 }
 
 /**
+ * 離線示範劇本存取器：回傳該個案自帶的劇本陣列（沒有則為空陣列）。
+ * app.js 用它決定無金鑰時能否進入面談，geminiService 用它決定能否播放下一回合，
+ * 兩邊共用同一個判斷，避免出現兩套「有沒有劇本」的定義。
+ */
+export function getScriptedFlow(caseDetails) {
+  const flow = caseDetails && caseDetails.roleplay_flow;
+  return Array.isArray(flow) ? flow : [];
+}
+
+/**
  * 1. AI 案主角色扮演對話生成
  */
 export async function generateClientReply(apiKey, model, caseDetails, history, userMessage) {
   if (!apiKey) {
-    // 降級退路：如果在沒有金鑰時，從預設模擬流中提取
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const step = history.length / 2;
-        if (caseDetails.roleplay_flow && caseDetails.roleplay_flow[step]) {
-          resolve({
-            reply: caseDetails.roleplay_flow[step].ai_reply,
-            coachHint: caseDetails.roleplay_flow[step].coach_hint
-          });
-        } else {
-          resolve({
-            reply: "（案主低下頭，輕聲說）社工，我真係好累……你講嘅道理我都明，但我依家好亂，可唔可以比我靜下先？",
-            coachHint: "【AI 督導提示】：案主展現出重度疲憊與防衛。此時不宜再強力推進（如訂立行動計劃），建議使用 MI 的反映式傾聽（同理他的累與混亂），或 ACT 的關注當下（做一個簡單的呼吸練習，陪他安靜坐一陣）。"
-          });
-        }
-      }, 1500);
-    });
+    // 離線示範模式：只播放個案自帶的預設劇本，播完即誠實告知。
+    // PRD v3「No Fabricated Clinical Content」不容許在劇本之外憑空生成假對白，
+    // 因此此處絕不提供通用兜底回應（M6 前的舊行為）。
+    const script = getScriptedFlow(caseDetails);
+    const step = history.length / 2;
+
+    if (script.length === 0) {
+      const err = new Error(`此個案沒有預設示範劇本，需要 Gemini API 金鑰才能對話。請於「系統設定」輸入金鑰後再試。`);
+      err.code = "OFFLINE_NO_SCRIPT";
+      throw err;
+    }
+    if (!script[step]) {
+      const err = new Error(`示範劇本已播放完畢（共 ${script.length} 回合）。繼續對話需要 Gemini API 金鑰，請於「系統設定」輸入後再試。`);
+      err.code = "OFFLINE_SCRIPT_EXHAUSTED";
+      throw err;
+    }
+
+    // 保留原有的思考停頓感，讓示範節奏貼近真實對話
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return {
+      reply: script[step].ai_reply,
+      coachHint: script[step].coach_hint,
+      scripted: true
+    };
   }
 
   // 單次往返雙角色 schema（ADR-0002 / PRD v3 AI Gateway）。
@@ -345,21 +362,13 @@ export async function generateCustomCase(apiKey, model, options) {
  */
 export async function generateSessionReport(apiKey, model, caseDetails, history) {
   if (!apiKey) {
-    // 降級退路
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({
-          scores: {
-            empathy: 80,
-            changeTalk: 75,
-            actFlexibility: 85,
-            icfAccuracy: 70,
-            actionPlanning: 90
-          },
-          summary: "在本次模擬輔導中，你展現了非常出色的同理心（MI）與價值澄清引導（ACT）。你精準捕捉到了阿強對家人的責任感，成功引導他跨越了「開小巴才是唯一出路」的認知融合。但在行動計劃（Action Planning）的具體細節上，可以多加留意阿強在 ICF 框架下右側偏癱的手部活動局限，為其配置更具體的輔助技術支援（例如廣東話語音輸入法體驗）。整體而言，這是一次非常溫暖且具備臨床深度的輔導！"
-        });
-      }, 2000);
-    });
+    // 離線示範模式沒有 AI，就不可能有 AI 臨床評估。
+    // 舊版在此回傳一份寫死的評分與總結（且不論個案一律點名「阿強」），
+    // 那是把罐頭文字放在同工會讀作 AI 臨床分析的位置，違反 PRD v3
+    // 「No Fabricated Clinical Content」。呼叫端據 code 判斷仍要保存逐字與日誌。
+    const err = new Error("離線示範模式沒有 AI 臨床評估。本次面談的逐字紀錄與日誌會照常保存；配置 Gemini API 金鑰後即可獲得評分與督導總結。");
+    err.code = "OFFLINE_NO_EVALUATION";
+    throw err;
   }
 
   const systemInstruction = `
