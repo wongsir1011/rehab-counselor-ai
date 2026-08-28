@@ -362,21 +362,13 @@ export async function generateCustomCase(apiKey, model, options) {
  */
 export async function generateSessionReport(apiKey, model, caseDetails, history) {
   if (!apiKey) {
-    // 降級退路
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({
-          scores: {
-            empathy: 80,
-            changeTalk: 75,
-            actFlexibility: 85,
-            icfAccuracy: 70,
-            actionPlanning: 90
-          },
-          summary: "在本次模擬輔導中，你展現了非常出色的同理心（MI）與價值澄清引導（ACT）。你精準捕捉到了阿強對家人的責任感，成功引導他跨越了「開小巴才是唯一出路」的認知融合。但在行動計劃（Action Planning）的具體細節上，可以多加留意阿強在 ICF 框架下右側偏癱的手部活動局限，為其配置更具體的輔助技術支援（例如廣東話語音輸入法體驗）。整體而言，這是一次非常溫暖且具備臨床深度的輔導！"
-        });
-      }, 2000);
-    });
+    // 離線示範模式沒有 AI，就不可能有 AI 臨床評估。
+    // 舊版在此回傳一份寫死的評分與總結（且不論個案一律點名「阿強」），
+    // 那是把罐頭文字放在同工會讀作 AI 臨床分析的位置，違反 PRD v3
+    // 「No Fabricated Clinical Content」。呼叫端據 code 判斷仍要保存逐字與日誌。
+    const err = new Error("離線示範模式沒有 AI 臨床評估。本次面談的逐字紀錄與日誌會照常保存；配置 Gemini API 金鑰後即可獲得評分與督導總結。");
+    err.code = "OFFLINE_NO_EVALUATION";
+    throw err;
   }
 
   const systemInstruction = `

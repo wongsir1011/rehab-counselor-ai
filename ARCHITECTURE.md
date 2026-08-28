@@ -162,6 +162,15 @@ Every item below was reproduced by running the app, not inferred from reading th
 
 Verified sound during the same review, by execution rather than assertion: the other four Gemini functions are unaffected by the `callGeminiAPI` signature change (`responseSchema === undefined` for all four under stub); two consecutive failures leave no bubble accumulation (7 → 7 → 7); a failure does not overwrite text the counselor typed while waiting; `setCoachPanelVisible()` is a top-level declaration with all three call sites after it; `clientShortName` has zero remaining references.
 
+### Findings from the Milestone 6 peer review (2026-08-29 00:52 HKT) — both resolved in the same round
+
+| ID | Finding | Evidence & resolution |
+| :--- | :--- | :--- |
+| ~~D18~~ | **Fabricated clinical evaluation in offline mode.** `generateSessionReport()` returned a hard-coded report — fixed scores (80/75/85/70/90) and a summary that named 阿強 regardless of which case was interviewed, praising the counselor for things that never happened. It fed the radar chart, was written to the vault, and was exported to supervisors with no marking. | Proven by direct module calls: two different cases and two different transcripts produced byte-identical scores and summary, and the summary still said 阿強 when the case was 美玲. **RESOLVED**: the offline branch now throws `OFFLINE_NO_EVALUATION`; the session is still finalized and vaulted with `report: null`, preserving the transcript and notes, and every consumer is guarded by a single `hasEvaluation()` predicate. |
+| ~~D19~~ | **Fabricated radar defaults.** With zero sessions the Analytics radar was seeded with `{75, 60, 80, 45, 65}` and derived a grade from it, so a counselor who had never held an interview was shown "優良 (B+)" as their own standing. | **RESOLVED**: with no evaluated sessions the radar renders empty and the grade line reads 「尚無已評估的面談紀錄」. The longitudinal trend chart's simulated data was **left alone** — it already carries a `simulatedBadge` and dashed strokes, so it was honest to begin with. |
+
+Aggregates now exclude unevaluated sessions from the **denominator** rather than counting them as zero — verified with a mixed vault (one session scored 60 across all five dimensions plus one unevaluated): the grade came out 合格 (C) with an average of 60, not 需提升 (D) at 30.
+
 ### Confirmed sound
 
 - **Access model matches the PRD exactly** — single-user, local-first, no accounts, no server-side gate to bypass, no multi-tenant data. Nothing added beyond the PRD, nothing missing from it.

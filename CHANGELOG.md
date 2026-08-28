@@ -4,6 +4,38 @@
 
 ---
 
+## [v20260829_v24_m6b] - 2026-08-29 01:00 (香港時間 UTC+8)
+
+### 🚫 Milestone 6 補完：移除偽造的臨床評估
+同儕審查發現 M6 只標示了示範**對話**，漏掉臨床**評估**。依 [plan/06-honest-offline-demo.md](plan/06-honest-offline-demo.md) §9 補完。
+
+*   **離線模式不再產生假評估**：`generateSessionReport()` 的 `!apiKey` 分支原本回傳寫死的 `scores`（80/75/85/70/90）與 `summary`。實測證實：兩個不同個案、兩段完全不同的對話，回傳內容**逐字元相同**，而且總結一律點名「阿強」—— 對一場與美玲的面談，那句「你精準捕捉到了阿強對家人的責任感」所描述的事從未發生。該報告會進入雷達圖、寫入保險箱、匯出給督導，且無任何標示。現改為拋出 `code: "OFFLINE_NO_EVALUATION"`。
+*   **離線面談仍完整保存**：逐字紀錄與 SOAP／ICF 日誌是同工的真實工作產物，不因缺少評分而丟棄。`endRoleplaySession()` 區分「離線無評估」與「有金鑰但呼叫失敗」，前者照常建立 `completedSession`（`report: null`）並寫入保險箱，後者維持大聲報錯且不寫入半套記錄。
+*   **新增無評估完成畫面**：`renderSessionCompletedWithoutEvaluation()` 只呈現真實存在的內容 —— 逐字回顧（含示範標記）與同工自己撰寫的日誌，明說沒有臨床評估及原因，不畫雷達、不給等第、不編總結。
+*   **十四個消費點統一守衛**：新增單一述詞 `hasEvaluation(session)`。**彙總類將未評估面談排除於分母之外，不以 0 計入** —— 以 0 計入會靜默拉低同工的真實統計，那是另一種形式的失真。歷史卡片改顯示「離線示範 · 未評估」；詳情彈窗以說明取代督導總結；Markdown 匯出略去評分段落改列說明行；成就 `empathy >= 90` 在無評估時略過。
+*   **一併移除分析頁的偽造雷達預設值**：`app.js` 原本在零筆歷史時塞入 `{75, 60, 80, 45, 65}` 並據此算出等第，令**從未做過任何面談**的同工看到「優良 (B+)」。改為雷達留白、等第顯示「尚無已評估的面談紀錄」。只修離線報告而留下它就是狹隘修復。**縱向趨勢圖的模擬資料不動** —— 它已有 `simulatedBadge` 與虛線樣式，本來就誠實。
+*   **快取破除**：`index.html` 的 `app.js?v=`、`app.js` 的 `geminiService.js?v=` 更新至 `v20260828_v23_m6b`。
+
+### ✅ 驗證 (Verification)
+*   `python3 check_syntax.py` 全數通過。
+*   **stub 隔離測試**：離線評估拋 `OFFLINE_NO_EVALUATION` 且零網路請求；有金鑰時評估正常且 prompt 確實帶入對話；**M6 四條與 M5 五條回歸全部重跑通過**。
+*   **真實瀏覽器**：離線結束面談出現「本次沒有臨床評估」畫面、無雷達無等第、不再點名阿強；逐字（含示範標記）與 SOAP 日誌完整保留；保險箱記錄 `report === null`；Markdown 匯出無評分數字、有說明行、仍含逐字；分析頁零評估時「優良 (B+)」已消失、改顯示「尚無已評估的面談紀錄」；歷史卡片顯示「離線示範 · 未評估」；詳情彈窗以說明取代總結。
+*   **混合分母測試**：保險箱放入 1 筆已評估（五項各 60 分）＋ 1 筆未評估 → 等第為「合格 (C)」、儀表板顯示 60。**分母為 1 而非 2** —— 若誤把未評估者以 0 計入會得 30 分（需提升 D）。
+*   全新分頁載入主控台零輸出。
+*   ⚠️ **未執行**：真實 Gemini 金鑰端對端。
+
+### 📐 文檔同步
+*   [ARCHITECTURE.md](ARCHITECTURE.md) §7：新增「Findings from the Milestone 6 peer review」小節，**D18（偽造臨床評估）與 D19（偽造雷達預設值）皆標記為 RESOLVED**。**D6／D6′、D13、D16、D17 仍未解決**，分屬 M7／M8 與待決事項。
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 6 於補完後重新標記 Completed。
+*   [plan/06-honest-offline-demo.md](plan/06-honest-offline-demo.md)：新增 §9 補完計劃與 §9.7 驗證結果。
+
+### 📦 變更檔案 (Files Changed)
+*   [geminiService.js](geminiService.js)：`generateSessionReport()` 移除罐頭報告，改拋帶 `code` 的錯誤。
+*   [app.js](app.js)：新增 `hasEvaluation()` 與 `renderSessionCompletedWithoutEvaluation()`；`endRoleplaySession()` 區分離線與失敗；儀表板、分析頁彙總、趨勢圖、歷史卡片、詳情彈窗、Markdown 匯出、成就門檻共 14 處加上守衛；移除偽造雷達預設值與其等第；更新快取戳記。
+*   [index.html](index.html)：更新 `app.js` 快取戳記。
+
+---
+
 ## [v20260828_v23_m6] - 2026-08-28 10:53 (香港時間 UTC+8)
 
 ### 🎭 Milestone 6 交付：誠實的離線示範
