@@ -4,6 +4,110 @@
 
 ---
 
+## [v20260829_v24_m7] - 2026-08-29 (香港時間 UTC+8)
+
+## 🎯 Milestone 7「每個數字都來自你的紀錄」
+
+平台只說它有證據的話。**沒有紀錄就顯示「尚無紀錄」，沒有評估就顯示「未評估」，沒有達標就不發徽章。**
+
+計劃：[`plan/07-every-number-from-your-record.md`](plan/07-every-number-from-your-record.md)（已批准 2026-08-29）
+對應 PRD v4：`HARD CONSTRAINTS → No Claim Without Evidence`、`No Fabricated Clinical Content`、`SSOT`
+
+### 🧭 單一推導點（本次的核心）
+新增 `computeCounselorRecord(historySessions)`，回傳 `{ totalSessions, evaluatedSessions, evaluatedCount, distinctCaseIds, userTurns, radar, radarAverage }`。儀表板、分析頁、縱向趨勢圖、徽章判定全部改讀它，各自的加總迴圈刪除。
+
+`radar` 與 `radarAverage` 在零筆已評估面談時是 **`null`，不是 0**。這是結構性防呆而非風格選擇：D20 的成因正是「沒有評估」被寫成 0 之後靜默流進座標公式，畫出一個收縮到圓心的五邊形 —— 讀起來是「這位同工五項都拿 0 分」。`null` 進入同一條公式會立刻壞掉而不是說謊，呼叫端因此被迫顯式處理「尚無紀錄」。
+
+### ❌ 移除的無據宣稱
+*   **儀表板「個人能力值縮影」**：寫死的多邊形座標 `100,50 160,82 …` 與「聽力共情：極佳 (A)」「承諾行動引導：優良 (B+)」—— 零場面談也照樣顯示。改由同工自己的已評估面談推導，無紀錄時只畫格線並說明。
+*   **四個字母等第**（卓越 A／優良 B+／合格 C／需提升 D）：全部刪除，改為「AI 即時回饋（練習參考）：你 N 場已評估面談的五維平均為 X 分」。
+*   **MI 闖關結束語**：原本無論 20 分還是 100 分都說「這代表你已基本掌握」。改為據實顯示 `得分 / 滿分`（滿分由題庫計算，非寫死 100），並依實際得分率給不同措辭；低分時直說哪一類回應出了問題。
+*   **「知識探險家」徽章**：原本走到最後一題就發，描述卻寫「完美通過」。條件改為三個理論模組全完成 **且** 闖關每題選中最高分回應。
+*   **「初試啼聲」徽章**：原本離線無評估面談也發，描述卻寫「並生成評估報告」。條件改為需有已評估面談。
+*   **縮影雷達說明**：「平台整合自學表現與 SOAP 評核的雷達圖」—— 程式從未整合這兩者。改為指出真實來源。
+*   **分析頁「專家培訓建議」**：寫死「你目前在 ACT 的心理彈性概念上自學非常充足」，0/9 進度時亦然。改為指向紀錄中確實未完成的模組或確實最低的維度。
+*   **小組研討結語**：無論答題結果都說小組「深化了實戰心得」。改為陳述完成題數並指向下一步。
+
+### 🔢 「未評估」不再畫成「0 分」（D20 —— 是四處，不是三處）
+1.  **儀表板平均分卡**：原以 `historySessions.length > 0` 開關，保險箱裡只有離線示範面談時顯示「0分」與空圓環。改看已評估場次 → 顯示「—」與「尚未評估 (N/A)」。
+2.  **歷史詳情彈窗**：原把五維解構為 0 並照樣畫雷達與「同理反映 0」。零填充的解構整個刪除，改為說明卡。
+3.  **分析頁雷達**：原在零筆已評估時仍以全 0 畫多邊形。改為不輸出 `<polygon>`，圖中央標示「尚無紀錄」。
+4.  **縱向趨勢圖（本次新發現）**：原以 `historySessions.length < 2` 決定是否標示「模擬成長對照引導線」。兩場離線示範面談會讓它判定為「有真實資料」而抽掉徽章，但資料點經 `filter(hasEvaluation)` 後是空陣列 —— 畫出一張無徽章、無資料點卻聲稱屬於同工的趨勢圖。改看已評估場次。
+
+### 🗣️ 練習輔助聲明（PRD v4「No Claim Without Evidence」最後一句）
+凡出現分數或督導建議的位置都加上「以上為 AI 練習回饋，非督導評核；臨床判斷屬於真人督導。」共五處：面談室督導提示面板、面談後評估報告頁、歷史詳情彈窗評分卡、分析頁雷達卡、Markdown 匯出的評估段落。由單一常數與函式輸出，避免五份措辭各自漂移。
+
+### 🗄️ SSOT：刪除完成場次的兩份副本（D7）
+`rehab_completed_cases_count`（**零讀取點**）與 `rehab_completed_case_ids`（唯一讀取點為「實戰特工」徽章）自 `localStorage` 移除；`sessions` object store 成為唯一權威來源。
+
+備份檔的 `completedCount` / `completedIds` 欄位名與格式**不變**（舊備份仍可還原），但值改由 `sessions` 推導，還原時刻意忽略 —— 寫回去只會重建一份可能與 `sessions` 矛盾的副本，那正是 D7 的成因。
+
+### 🏅 徽章條件與一次性對帳
+新增 `evaluateAchievement(id, record)`，回傳 `true` / `false` / **`null`**。`null` 代表**沒有可查證的持久紀錄**（ICF 沙盒結果不落地、自定義個案可被刪除、MI 闖關分數只存在於記憶體），此類徽章沿用既有值，不撤銷也不代發。
+
+開機時執行一次 `reconcileAchievementsOnce()`（旗標寫入既有 `app_meta`，不需 DB 版本變更），只收回**條件可查證且不符**者，並在徽章牆顯示一次說明。
+
+### 🐛 建置期間抓到的兩個 bug
+**其一，由同儕審查讀碼發現**：`reconcileAchievementsOnce()` 的旗標檢查寫成 `done.value.done`，但 `RehabCounselorDB.getMeta()` 回傳的是 value 本身而非 `{key, value}` 記錄 —— 旗標形同不存在，對帳每次開機都重跑。因為效果上冪等，第一輪測試「通過」了但原因不對。已修正並以兩次開機（中間人為塞回徽章）重新驗證。
+
+**其二，由自身測試抓到**
+：`evaluateAchievement("theory_explorer")` 第一版在闖關未於本次執行時回 `false`，導致**每次重新整理都會收回**一個合法取得的徽章 —— `miGameScore` 開機歸零。改為此情況回 `null`（無從查證），只有當持久的理論進度證明未達標時才回 `false`。這正是「不可查證 ≠ 未達標」的分野，與 `radar` 用 `null` 而非 0 是同一個原則。
+
+### 🎨 順帶處理（依路線圖，設計系統工作隨觸及畫面處理）
+`#radar-recommendation-panel` 以 `rgba(10,15,30,0.85) !important` 寫死深色底，淺色主題下深字疊深底不可讀。補上 `[data-theme="light"]` 覆寫。屬 `ARCHITECTURE.md` §8 記錄的既有問題，本次只補這一塊。
+
+### ✅ 驗證
+*   `check_syntax.py` 全數通過。
+*   **純函式隔離測試**（以真實模組原始碼於瀏覽器中執行，非複本）：零筆／全未評估 → `radar === null`；一評估一未評估 → 分母為 1；60 與 90 兩場加兩場未評估 → 平均 75；`distinctCaseIds` 去重正確；`radarPolygonPoints(null)` 回 `null`。
+*   **徽章判定隔離測試**：`first_session` 僅未評估時不解鎖；`empathy_master` 89 不給、90 給；`combat_specialist` 需 3 個不同個案；`theory_explorer` 在「三模組完成但闖關 80%」「闖關滿分但 ICF 模組未完成」皆不解鎖，兩者俱足才解鎖。
+*   **真實瀏覽器**：空保險箱、三筆未評估、一評估＋三未評估三種情境逐一檢視儀表板、分析頁、詳情彈窗、趨勢圖；全程未出現「0分」或字母等第。
+*   **MI 闖關實走**：全選說教型回應 → 13/100，結束語為據實陳述，徽章**未**解鎖；全選最佳回應 → 100/100，徽章解鎖。
+*   **對帳旗標實測**：開機一收回並寫入旗標；開機二把徽章人為塞回 → 對帳**未**再執行，徽章保留（「只跑一次」確實成立）。
+*   **危險區「重設進度」**：保險箱清空、徽章清空、三個已停用的舊鍵一併移除、零 JS 錯誤。
+*   **對帳實測**：植入六個徽章對上只支持四個的紀錄 → 收回 `empathy_master`（60<90 可查證），保留 `icf_expert`／`case_creator`（無從查證）與 `theory_explorer`；理論模組改為未完成後重測 → `theory_explorer` 被收回。重新整理後不重覆收回、說明不重覆顯示。
+*   **備份還原**：匯出 → 清空 → 還原 → 重新開機，四個指標卡、縮影雷達、徽章清單與還原前**逐字相同**；備份檔不含任何 API 金鑰。
+*   **回歸**：M5 單次結構化往返（`callCount === 1`、`responseSchema.required`／`propertyOrdering` 正確、缺欄位大聲拋錯）；M6 離線示範標示（氣泡徽章、`history[].scripted`、Markdown 逐行「［示範劇本］」與標頭警語）全部重跑通過。
+*   **主控台**：全新分頁載入零錯誤。深色與淺色主題皆實際截圖檢視。
+
+### ⚠️ 未驗證
+真實 Gemini 金鑰的端對端流程（線上路徑以 stub 驗證）；MiniMax TTS 與連續 STT；降級模式（`localstorage-fallback`）下的對帳路徑（程式碼有分支，未實跑）；`prefers-reduced-motion` 與鍵盤操作（屬 D24，未列入本里程碑）。
+
+### 📦 變更檔案
+*   [app.js](app.js)：`computeCounselorRecord`／`radarPolygonPoints`／`evaluateAchievement`／`reconcileAchievementsOnce`／`miDrillMaxScore`／`renderSessionScoreCard`／`renderSessionNotEvaluatedCard`／練習聲明；儀表板、分析頁、詳情彈窗、趨勢圖、MI 闖關、小組研討、成就牆改寫；`completedCasesCount`／`completedCaseIds` 移除。
+*   [mockData.js](mockData.js)：兩個徽章描述、`mini_radar_desc` 三語修正。
+*   [src/utils/db.js](src/utils/db.js)：`buildBackupJSON` 改為推導、`importFullBackupJSON` 忽略衍生欄位。
+*   [index.css](index.css)：`.practice-support-notice`、`.achievement-reconcile-notice`、`#radar-recommendation-panel` 淺色覆寫。
+*   [index.html](index.html)、[app.js](app.js) 匯入：快取戳記更新為 `v20260829_v24_m7`（`geminiService.js` 未改，戳記保持）。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)、[Product_Roadmap.md](Product_Roadmap.md)、[plan/07-every-number-from-your-record.md](plan/07-every-number-from-your-record.md)。
+
+**未更動**：`PRD.md`（本里程碑實作既有條款，未改產品意圖）、`CLAUDE.md`、`DECISIONS.md`、`adr/`、`geminiService.js`。
+
+---
+
+## [v20260829_v29_handoff] - 2026-08-29 06:02 (香港時間 UTC+8)
+
+本次為交接前的文檔補完提交，**不涉及任何執行碼變更**。目的是把只存在於工作對話中、未落入任何文件的事實寫進 repo，使後續工作階段不必重新發現。
+
+### 📐 ARCHITECTURE 新增第 8 節：表現層的量測現況
+視覺一致性難以維持的原因，無法從任何單一檔案看出，故以量測記錄：
+
+*   **樣式主要不住在樣式表裡**：`app.js` 有 **806** 個行內 `style` 屬性、**672** 個 `class` 屬性，而 `index.css` 有 **366** 條類別選擇器；行內樣式中有 **187** 個超過 100 字元（最長 524）。
+*   **因此任何尺度都撐不住**：418 個 `font-size` 宣告用了 **45 種**字級，其中 **219 個（過半）擠在 0.70–0.85rem**，六個級距落在 2.4px 之內，無法表達層級；間距 **20** 種、圓角 **11** 種、斷點 **6** 個。
+*   **因此淺色主題無法完整套用**：行內樣式特異度高於任何選擇器，而其中有 **155** 個寫死的顏色字面值（最常見 `rgba(255,255,255,0.02)` 與 `0.05` 各 11 次 —— 深色底上的表面層次，淺色底下會消失）；`index.css` 僅 **34** 條 `[data-theme="light"]` 覆寫。惟行內樣式亦有 **566** 處使用 `var(--…)`，故逸出是例外而非常態。
+*   動效 **26** 組 `@keyframes` 對 **0** 個 `prefers-reduced-motion`；9 條 `:focus` 但無 `:focus-visible`。
+*   權杖層本身健全：**32** 個 CSS 變數。問題不是沒有權杖，而是有一半介面不經過它們。
+
+### 📜 CLAUDE.md 新增「工作如何排序」一節
+把本專案實際遵循、但此前未寫入憲章的六步節奏記載下來：自路線圖取里程碑 → 寫程式碼前先產出 `plan/NN-slug.md`（含逐項風險審查與已決定的邊界處理）→ 擁有者整份批准 → 建置並驗證（誠實列出未驗證項）→ 同儕審查（重跑上一輪流程、檢查接縫、實跑錯誤路徑、依北極星與 SUCCESS 排序）→ 更新四支柱後交付推送。
+
+### 📦 變更檔案
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：新增第 8 節。
+*   [CLAUDE.md](CLAUDE.md)：新增「How work is sequenced」。
+
+**未更動**：`PRD.md`、`Product_Roadmap.md`、`DECISIONS.md`、`adr/`、`plan/`。
+
+---
+
 ## [v20260829_v28_prd_v4] - 2026-08-29 05:53 (香港時間 UTC+8)
 
 本次為產品意圖升版提交，**不涉及任何執行碼變更**。
