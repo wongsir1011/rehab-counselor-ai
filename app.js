@@ -1,8 +1,8 @@
 // RehabCounselor AI - 主應用控制器 (Vanilla SPA Engine)
 
-import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260724_v13_1";
+import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260829_v24_m7";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions, getScriptedFlow } from "./geminiService.js?v=20260828_v23_m6b";
-import { RehabCounselorDB } from "./src/utils/db.js?v=20260827_v18_adr0005";
+import { RehabCounselorDB } from "./src/utils/db.js?v=20260829_v24_m7";
 
 // Global App State
 const state = {
@@ -38,8 +38,11 @@ const state = {
   mysteryTimeoutId: null,   // 追蹤盲盒轉場定時器
   // Phase 4: Local Storage and STT State
   unlockedAchievements: JSON.parse(localStorage.getItem("rehab_unlocked_achievements")) || [],
-  completedCasesCount: parseInt(localStorage.getItem("rehab_completed_cases_count")) || 0,
-  completedCaseIds: JSON.parse(localStorage.getItem("rehab_completed_case_ids")) || [],
+  // Milestone 7 §3.7：對帳收回的徽章數；>0 時徽章牆顯示一次說明。非持久狀態。
+  achievementsReconciledCount: 0,
+  // Milestone 7 / D7：completedCasesCount 與 completedCaseIds 已移除。
+  // 兩者是 sessions object store 的平行副本，違反 SSOT；前者零讀取點，後者
+  // 唯一讀取點（實戰特工徽章）改用 computeCounselorRecord().distinctCaseIds。
   isRecording: false,
   recognition: null,
   recognitionLang: localStorage.getItem("rehab_recognition_lang") || (() => {
@@ -348,6 +351,100 @@ function hasEvaluation(session) {
   return !!(session && session.report && session.report.scores);
 }
 
+/**
+ * Milestone 7：關於同工能力的每一個衍生數字的**單一推導點**。
+ *
+ * PRD v4「No Claim Without Evidence」要求每個數字都算自同工自己的紀錄，
+ * 「SSOT」要求衍生值（場次、完成統計、雷達彙總、進度徽章）在**一處**計算。
+ * 儀表板、分析頁、趨勢圖、徽章判定全部讀這支的輸出，不各自加總。
+ *
+ * ⚠️ `radar` 與 `radarAverage` 在零筆已評估面談時是 **null，不是 0**。
+ * 這是結構性防呆：D20 的成因正是「沒有評估」被寫成 0 之後，靜默流進座標
+ * 公式畫出一個收縮到圓心的五邊形 —— 讀起來是「這場拿了 0 分」。null 進入
+ * 同一條公式會立刻壞掉而不是說謊，所以呼叫端被迫顯式處理「尚無紀錄」。
+ */
+function computeCounselorRecord(historySessions) {
+  const sessions = Array.isArray(historySessions) ? historySessions : [];
+  const evaluatedSessions = sessions.filter(hasEvaluation);
+
+  const distinctCaseIds = new Set();
+  let userTurns = 0;
+  sessions.forEach(s => {
+    if (s && s.caseId) distinctCaseIds.add(s.caseId);
+    if (s && Array.isArray(s.history)) {
+      userTurns += s.history.filter(h => h && h.role === "user").length;
+    }
+  });
+
+  let radar = null;
+  let radarAverage = null;
+  if (evaluatedSessions.length > 0) {
+    const sum = { empathy: 0, changeTalk: 0, defusion: 0, icf: 0, action: 0 };
+    evaluatedSessions.forEach(s => {
+      const sc = s.report.scores;
+      sum.empathy += sc.empathy || 0;
+      sum.changeTalk += sc.changeTalk || 0;
+      sum.defusion += sc.actFlexibility || 0;
+      sum.icf += sc.icfAccuracy || 0;
+      sum.action += sc.actionPlanning || 0;
+    });
+    const n = evaluatedSessions.length;
+    radar = {
+      empathy: Math.round(sum.empathy / n),
+      changeTalk: Math.round(sum.changeTalk / n),
+      defusion: Math.round(sum.defusion / n),
+      icf: Math.round(sum.icf / n),
+      action: Math.round(sum.action / n)
+    };
+    radarAverage = Math.round(
+      (radar.empathy + radar.changeTalk + radar.defusion + radar.icf + radar.action) / 5
+    );
+  }
+
+  return {
+    totalSessions: sessions.length,
+    evaluatedSessions,
+    evaluatedCount: evaluatedSessions.length,
+    distinctCaseIds,
+    userTurns,
+    radar,
+    radarAverage
+  };
+}
+
+/**
+ * Milestone 7：五維雷達多邊形的座標公式，儀表板縮影與分析頁共用一份。
+ * `radar` 為 null 時回傳 null —— 呼叫端據此**不輸出 polygon**，只留格線。
+ */
+function radarPolygonPoints(radar, maxRadius) {
+  if (!radar) return null;
+  const r = maxRadius / 100;
+  const p1 = { x: 100, y: 100 - r * radar.empathy };
+  const p2 = { x: 100 + r * radar.changeTalk * 0.951, y: 100 - r * radar.changeTalk * 0.309 };
+  const p3 = { x: 100 + r * radar.defusion * 0.588, y: 100 + r * radar.defusion * 0.809 };
+  const p4 = { x: 100 - r * radar.icf * 0.588, y: 100 + r * radar.icf * 0.809 };
+  const p5 = { x: 100 - r * radar.action * 0.951, y: 100 - r * radar.action * 0.309 };
+  return [p1, p2, p3, p4, p5].map(p => `${p.x},${p.y}`).join(" ");
+}
+
+/**
+ * Milestone 7 / PRD v4「No Claim Without Evidence」最後一句：
+ * 凡出現分數或督導建議之處，都要聲明這是練習輔助，臨床判斷屬於真人督導。
+ * 集中一處輸出，避免五個位置的措辭各自漂移。
+ */
+const PRACTICE_SUPPORT_NOTICE = "以上為 AI 練習回饋，非督導評核；臨床判斷屬於真人督導。";
+const PRACTICE_SUPPORT_NOTICE_EN = "AI practice feedback, not a supervisory assessment. Clinical judgement rests with a human supervisor.";
+
+function practiceSupportNoticeText() {
+  return state.locale === "en" ? PRACTICE_SUPPORT_NOTICE_EN : PRACTICE_SUPPORT_NOTICE;
+}
+
+function practiceSupportNoticeHTML(extraStyle) {
+  return `<p class="practice-support-notice"${extraStyle ? ` style="${extraStyle}"` : ""}>
+    <i class="fa-solid fa-circle-info"></i> ${practiceSupportNoticeText()}
+  </p>`;
+}
+
 function getCustomCases() {
   return state.cases.filter(c => c && !BUILTIN_CASE_IDS.has(c.id));
 }
@@ -467,8 +564,6 @@ function refreshStateFromLocalStorage() {
   };
 
   state.userName = localStorage.getItem("rehab_user_name") || "";
-  state.completedCasesCount = parseInt(localStorage.getItem("rehab_completed_cases_count"), 10) || 0;
-  state.completedCaseIds = readJSON("rehab_completed_case_ids", []);
   state.unlockedAchievements = readJSON("rehab_unlocked_achievements", []);
   state.theoryProgress = readJSON("rehab_theory_progress", {
     act: { info: false, flashcards: false, test: false },
@@ -592,6 +687,10 @@ async function initApp() {
   // 3. ADR-0005：載入本地保險箱。必須在首次渲染之前完成，
   //    否則儀表板與分析頁會先讀到空的 state.historySessions。
   await hydrateVault();
+
+  // 3b. Milestone 7 §3.7：一次性徽章對帳。必須在保險箱載入之後、首次渲染之前，
+  //     否則徽章牆會先畫出尚未對帳的狀態。失敗不阻擋開機。
+  await reconcileAchievementsOnce();
 
   // 4. Load default view (Dashboard)
   switchView("dashboard");
@@ -721,26 +820,21 @@ function renderDashboard(container) {
   }
   const progressPercent = Math.round((completedModules / 9) * 100);
 
-  const turnsCount = historySessions.reduce((acc, s) => acc + (s.history ? s.history.filter(h => h.role === 'user').length : 0), 0);
+  // Milestone 7：所有關於同工的衍生數字統一由 computeCounselorRecord() 推導。
+  const record = computeCounselorRecord(historySessions);
+  const turnsCount = record.userTurns;
   const turnsPercent = Math.min(100, Math.round(turnsCount / 50 * 100)); // Target 50 turns
 
-  let avgScore = 0;
-  let beatsPercent = 0;
-  // 未評估（離線示範）的面談排除於分母之外 —— 以 0 計入會靜默拉低同工的真實統計。
-  const evaluatedSessions = historySessions.filter(hasEvaluation);
-  if (evaluatedSessions.length > 0) {
-    const sum = evaluatedSessions.reduce((acc, s) => {
-      const avg = Math.round((s.report.scores.empathy + s.report.scores.changeTalk + s.report.scores.actFlexibility + s.report.scores.icfAccuracy + s.report.scores.actionPlanning) / 5);
-      return acc + avg;
-    }, 0);
-    avgScore = Math.round(sum / evaluatedSessions.length);
-    beatsPercent = Math.min(99, Math.round(avgScore * 1.1 - 5));
-    if (beatsPercent < 0) beatsPercent = 0;
-  }
+  // D20(a)：舊版以 historySessions.length > 0 開關平均分卡，保險箱裡只有離線示範
+  // 面談時 avgScore 為 0 而條件為真 → 顯示「0分」。正確答案是「尚未評估」。
+  const hasRadarData = record.radarAverage !== null;
+  const avgScore = record.radarAverage;
+  // 縮影雷達的格線半徑為 80（viewBox 200×200），與分析頁共用同一條座標公式。
+  const miniRadarPoints = radarPolygonPoints(record.radar, 80);
 
   const localizedProgressVal = t("dashboard_progress_val").replace("{completed}", completedModules);
   const localizedHoursVal = t("dashboard_hours_val").replace("{turns}", turnsCount);
-  const localizedAccuracyVal = historySessions.length > 0
+  const localizedAccuracyVal = hasRadarData
     ? t("dashboard_accuracy_val").replace("{score}", avgScore)
     : t("dashboard_accuracy_val_empty");
 
@@ -797,9 +891,9 @@ function renderDashboard(container) {
         <div style="position: relative; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
           <svg width="50" height="50" viewBox="0 0 36 36" style="transform: rotate(-90deg);">
             <circle cx="18" cy="18" r="16" fill="none" stroke="var(--illustration-line-faint)" stroke-width="3"/>
-            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-green)" stroke-width="3" stroke-dasharray="${historySessions.length > 0 ? avgScore : 0}, 100" stroke-linecap="round"/>
+            <circle cx="18" cy="18" r="16" fill="none" stroke="var(--accent-green)" stroke-width="3" stroke-dasharray="${hasRadarData ? avgScore : 0}, 100" stroke-linecap="round"/>
           </svg>
-          <span style="position: absolute; font-size: 0.72rem; font-weight: 800; color: var(--text-bright);">${historySessions.length > 0 ? avgScore + '分' : '—'}</span>
+          <span style="position: absolute; font-size: 0.72rem; font-weight: 800; color: var(--text-bright);">${hasRadarData ? avgScore + '分' : '—'}</span>
         </div>
         <div class="metric-info" style="margin-left: 14px;">
           <h4 style="font-size:0.75rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px;">${t("dashboard_accuracy_title")}</h4>
@@ -900,15 +994,28 @@ function renderDashboard(container) {
             <line x1="100" y1="100" x2="147" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
             <line x1="100" y1="100" x2="53" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
             <line x1="100" y1="100" x2="24" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
-            
-            <!-- pre-computed visual polygon for mini radar -->
-            <polygon points="100,50 160,82 135,140 70,140 45,82" fill="rgba(6, 182, 212, 0.2)" stroke="var(--accent-cyan)" stroke-width="2.5"/>
+
+            <!-- Milestone 7：多邊形由同工自己的已評估面談推導。舊版此處是一組寫死的
+                 座標 "100,50 160,82 …"，零場面談也照畫，是對同工能力的無據宣稱。 -->
+            ${miniRadarPoints
+              ? `<polygon points="${miniRadarPoints}" fill="rgba(6, 182, 212, 0.2)" stroke="var(--accent-cyan)" stroke-width="2.5"/>`
+              : ""}
           </svg>
-          
-          <div style="display:flex; justify-content:space-between; width:100%; font-size:0.75rem; color:var(--text-muted); border-top: 1px solid var(--card-border); padding-top:10px;">
-            <span>💡 ${state.locale === "en" ? "Empathy" : "聽力共情"}：<strong>${state.locale === "en" ? "Excellent (A)" : "極佳 (A)"}</strong></span>
-            <span>⚡ ${state.locale === "en" ? "Commitment Action" : "承諾行動引導"}：<strong>${state.locale === "en" ? "Good (B+)" : "優良 (B+)"}</strong></span>
+
+          <div style="width:100%; font-size:0.75rem; color:var(--text-muted); border-top: 1px solid var(--card-border); padding-top:10px;">
+            ${record.radar
+              ? `<div style="display:flex; justify-content:space-between; gap:8px;">
+                   <span>💡 ${state.locale === "en" ? "Empathy" : "傾聽共情"}：<strong style="color:var(--text-bright);">${record.radar.empathy} ${state.locale === "en" ? "" : "分"}</strong></span>
+                   <span>⚡ ${state.locale === "en" ? "Commitment Action" : "承諾行動"}：<strong style="color:var(--text-bright);">${record.radar.action} ${state.locale === "en" ? "" : "分"}</strong></span>
+                 </div>
+                 <div style="margin-top:6px; font-size:0.7rem;">
+                   ${state.locale === "en" ? `Averaged from ${record.evaluatedCount} evaluated session(s).` : `來自你 ${record.evaluatedCount} 場已評估面談的平均。`}
+                 </div>`
+              : `<div style="text-align:center; padding:2px 0;">
+                   ${state.locale === "en" ? "No evaluated sessions yet." : "尚無已評估的面談紀錄。"}
+                 </div>`}
           </div>
+          ${record.radar ? practiceSupportNoticeHTML() : ""}
         </div>
 
         <!-- 真實自學與實戰進度清單 (Checklist) -->
@@ -1717,26 +1824,53 @@ function renderMITab(container) {
     const gameData = data.oars_game[state.miGameIndex];
 
     if (!gameData) {
-      // Unlock theory explorer achievement
-      checkAndUnlockAchievements("theory_explorer");
-
       // Record progress
       if (state.theoryProgress) {
         state.theoryProgress.mi.test = true;
         saveTheoryProgress();
       }
 
-      const completedTitle = state.locale === "en" ? "Congratulations on completing the MI OARS Matcher Challenge!" : state.locale === "zh-CN" ? "恭喜完成 MI OARS 实战配对挑战！" : "恭喜完成 MI OARS 實戰配對挑戰！";
-      const completedDesc = state.locale === "en" 
-        ? `You successfully answered all 10 classic client resistance statements, accumulating <strong style="color:var(--accent-green); font-size:1.2rem;">${state.miGameScore}</strong> points! This shows you have mastered the spirit of MI and overcome the righting reflex.`
-        : `你成功解答了所有 10 大經典案主的矛盾衝突陳述，累積獲得了 <strong style="color:var(--accent-green); font-size:1.2rem;">${state.miGameScore}</strong> 分！這代表你已基本掌握了如何在就業輔導中克服「警報糾正反射」，並促成改變性談話。`;
+      // Milestone 7：徽章判定移入 evaluateAchievement()，只有真的達標才發。
+      // 舊版一律 checkAndUnlockAchievements("theory_explorer") —— 走到最後一題就給，
+      // 不看分數、不看另外兩個理論分頁，與徽章描述「完美通過」相矛盾。
+      checkAndUnlockAchievements("theory_explorer");
+
+      // 滿分由題庫計算，不寫死 100 —— Training Lead 增減題目時自動跟隨。
+      const maxScore = miDrillMaxScore(data.oars_game);
+      const ratio = maxScore > 0 ? state.miGameScore / maxScore : 0;
+      const questionCount = data.oars_game.length;
+
+      const completedTitle = state.locale === "en"
+        ? "MI OARS Matcher Challenge complete"
+        : state.locale === "zh-CN" ? "MI OARS 实战配对挑战完成" : "MI OARS 實戰配對挑戰完成";
+
+      // 據實陳述得分，不作未達標的掌握宣稱。全選說教型答案在舊版同樣顯示
+      // 「你已基本掌握」—— PRD v4「No Claim Without Evidence」禁止之列。
+      let verdict;
+      if (state.locale === "en") {
+        verdict = ratio >= 1
+          ? "You chose the strongest OARS response on every item."
+          : ratio >= 0.8
+          ? "Most items drew an OARS response; a few fell back on advice-giving."
+          : "Several items drew advice-giving rather than an OARS response — that is where the righting reflex shows up.";
+      } else {
+        verdict = ratio >= 1
+          ? "你在每一題都選中了最貼近 OARS 精神的回應。"
+          : ratio >= 0.8
+          ? "大部分題目你都選中了 OARS 回應，仍有幾題落回給建議。"
+          : "有幾題你選了說教／過早給建議的回應 —— 那正是「糾正反射」出現的位置。回顧那幾題的解說，比再走一次更有用。";
+      }
+
+      const completedDesc = state.locale === "en"
+        ? `You answered all ${questionCount} items and scored <strong style="color:var(--accent-green); font-size:1.2rem;">${state.miGameScore}</strong> / ${maxScore}. ${verdict}`
+        : `你完成了全部 ${questionCount} 題，得分 <strong style="color:var(--accent-green); font-size:1.2rem;">${state.miGameScore}</strong> / ${maxScore} 分。${verdict}`;
       const btnRetry = state.locale === "en" ? "Retry Challenge" : "重新挑戰";
       const btnBack = state.locale === "en" ? "Back to Study" : "回到自學理論";
 
       // Game completed, render reset
       container.innerHTML = `
         <div class="glass-card text-center" style="padding:48px 24px; text-align:center;">
-          <div style="font-size:4rem; margin-bottom:16px;">🏆</div>
+          <div style="font-size:4rem; margin-bottom:16px;">${ratio >= 1 ? "🏆" : "📋"}</div>
           <h3 style="font-size:1.6rem; font-weight:800; color:var(--text-bright); margin-bottom:8px;">${completedTitle}</h3>
           <p style="color:var(--text-muted); max-width:520px; margin:0 auto 24px; line-height:1.5;">
             ${completedDesc}
@@ -3485,6 +3619,7 @@ function startRoleplaySession(selectedCase) {
           <div id="rp-coach-feedback" style="font-size:0.82rem; color:var(--text-muted); line-height:1.5; background:var(--nested-bg-medium); padding:10px; border-radius:8px; border:1px dashed var(--card-border);">
             ${state.locale === "en" ? "No supervisor analysis yet. It will appear here, already open, as soon as you speak to the client." : "尚未有督導分析。開始與案主對話後，督導提示會即時出現在此處，無需點擊。"}
           </div>
+          ${practiceSupportNoticeHTML("margin:0;")}
         </div>
 
         <!-- Case Notes Workspace -->
@@ -4456,15 +4591,9 @@ async function endRoleplaySession() {
   try {
     state.activeSession.report = report;
     
-    // Save progression stats to LocalStorage (Phase 4)
-    state.completedCasesCount += 1;
-    localStorage.setItem("rehab_completed_cases_count", state.completedCasesCount);
-    
-    if (!state.completedCaseIds.includes(state.activeCase.id)) {
-      state.completedCaseIds.push(state.activeCase.id);
-      localStorage.setItem("rehab_completed_case_ids", JSON.stringify(state.completedCaseIds));
-    }
-    
+    // D7：完成場次與已完成個案 id 不再另存一份 —— sessions object store 是唯一
+    // 權威來源，統計一律由 computeCounselorRecord() 從它推導。
+
     // Save completed session to local history portfolio (Phase 5)
     const completedSession = {
       id: "session_" + Date.now(),
@@ -4484,12 +4613,11 @@ async function endRoleplaySession() {
     // Play physical success sound
     AudioSynth.playSuccess();
     
-    // Trigger Achievements Check
+    // Trigger Achievements Check（條件由 evaluateAchievement() 依保險箱紀錄判定）
+    const recordAfterSession = computeCounselorRecord(state.historySessions);
     checkAndUnlockAchievements("first_session");
-    if (hasEvaluation({ report }) && report.scores.empathy >= 90) {
-      checkAndUnlockAchievements("empathy_master");
-    }
-    if (state.completedCaseIds.length >= 3) {
+    checkAndUnlockAchievements("empathy_master");
+    if (recordAfterSession.distinctCaseIds.size >= 3) {
       checkAndUnlockAchievements("combat_specialist");
     }
     
@@ -4658,6 +4786,7 @@ function renderSessionReport(container, report) {
       <!-- Right: Detailed Supervisor Feedback Summary -->
       <div class="glass-card" style="display:flex; flex-direction:column; gap:16px;">
         <h3 style="font-size:1.15rem; font-weight:800; color:var(--text-bright);"><i class="fa-solid fa-user-tie" style="color:var(--accent-cyan);"></i> 臨床總結督導報告 (Clinical Summary)</h3>
+        ${practiceSupportNoticeHTML("margin:0;")}
         <p style="font-size:0.95rem; color:var(--text-main); line-height:1.6; background:rgba(255,255,255,0.02); padding:16px; border-radius:10px; border-left:4px solid var(--accent-cyan);">
           ${report.summary.replace(/\n/g, "<br>")}
         </p>
@@ -5089,8 +5218,8 @@ function renderCoQuestion(qIdx) {
         <h4 style="color:var(--accent-green); font-size:1.1rem; font-weight:800; margin-bottom:6px;">🎉 ${state.locale === "en" ? "Study Session Completed!" : "小組研討圓滿完成！"}</h4>
         <p style="font-size:0.85rem; color:var(--text-main);">
           ${state.locale === "en"
-            ? "Your group completed analyzing client resistance factors. We suggest immediately applying these insights in the simulator arena!"
-            : "同工小組通過探討阿強面談中的阻抗點，深化了對於 MI『避免糾正反射』與『滾動阻抗反映』的實戰心得。建議小組立即將此心得運用到【模擬輔導室】的語音實戰演練中！"}
+            ? `Your group worked through all ${caseData.questions.length} discussion items on this teaching case. The next step is to try the same techniques aloud in the roleplay cabin.`
+            : `小組已完成本教學個案的全部 ${caseData.questions.length} 道研討題。下一步是把同樣的技巧在【模擬輔導室】用廣東話講出來 —— 說出口與選出答案是兩回事。`}
         </p>
         <button class="btn btn-primary" id="co-go-arena-btn" style="margin-top:12px;">${state.locale === "en" ? "Go to Case Arena" : "前往實戰 Arena"}</button>
       </div>
@@ -5300,8 +5429,12 @@ function renderCustomQuizQuestions(quizData, qIdx, container) {
 function generateLongitudinalChartHTML(historySessions) {
   let dataPoints = [];
   let isSimulated = false;
-  
-  if (historySessions.length < 2) {
+
+  // Milestone 7：門檻改看**已評估**場次。舊版看 historySessions.length，兩場離線
+  // 示範面談就會被當成「有真實資料」→ 抽掉「模擬引導線」徽章，而 dataPoints 經
+  // filter(hasEvaluation) 後是空陣列，畫出一張無徽章、無資料點卻聲稱屬於同工的圖。
+  const evaluatedForTrend = historySessions.filter(hasEvaluation);
+  if (evaluatedForTrend.length < 2) {
     isSimulated = true;
     if (state.locale === "en") {
       dataPoints = [
@@ -5323,7 +5456,7 @@ function generateLongitudinalChartHTML(historySessions) {
       ];
     }
   } else {
-    dataPoints = historySessions.filter(hasEvaluation).map((session, index) => {
+    dataPoints = evaluatedForTrend.map((session, index) => {
       const s = session.report.scores;
       const avg = Math.round((s.empathy + s.changeTalk + s.actFlexibility + s.icfAccuracy + s.actionPlanning) / 5);
       return {
@@ -5537,57 +5670,67 @@ function renderAnalytics(container) {
   // ADR-0005：改讀記憶體副本（開機時由 hydrateVault() 從 IndexedDB 載入）
   const historySessions = state.historySessions;
 
-  // Calculate dynamic average scores across all history sessions
-  let empathySum = 0;
-  let changeTalkSum = 0;
-  let defusionSum = 0;
-  let icfSum = 0;
-  let actionSum = 0;
-  // 只有帶 AI 評估的面談才計入雷達平均；離線示範沒有評估，不能當作 0 分拉低平均。
-  const evaluatedSessions = historySessions.filter(hasEvaluation);
-  const totalSessions = evaluatedSessions.length;
+  // Milestone 7：雷達彙總改由 computeCounselorRecord() 單處推導，本頁不再自行加總。
+  const record = computeCounselorRecord(historySessions);
+  const totalSessions = record.evaluatedCount;
+  const hasRadarData = record.radar !== null;
 
-  if (totalSessions > 0) {
-    evaluatedSessions.forEach(s => {
-      empathySum += s.report.scores.empathy || 0;
-      changeTalkSum += s.report.scores.changeTalk || 0;
-      defusionSum += s.report.scores.actFlexibility || 0;
-      icfSum += s.report.scores.icfAccuracy || 0;
-      actionSum += s.report.scores.actionPlanning || 0;
+  // state.radarScores 由「另一份彙總副本」降格為本次 render 的推導快取；
+  // 語意改為 null = 尚無已評估紀錄，讓消費端無法把它誤當成 0 分。
+  state.radarScores = record.radar;
+
+  // D20(c)：舊版在零筆已評估時把五維填成 0 再照樣畫多邊形 —— 收縮到圓心的
+  // 五邊形讀起來是「這位同工五項都拿 0 分」。null 時不輸出 polygon。
+  const pointsStr = radarPolygonPoints(record.radar, 80);
+  const totalAvg = record.radarAverage;
+
+  // PRD v4「No Claim Without Evidence」：no letter grades。
+  // 舊版由平均分算出 卓越(A)/優良(B+)/合格(C)/需提升(D) 四個等第，
+  // 把語言模型的即時印象呈現為評核結果。改為據實陳述分數與其來源。
+  // 舊版此處寫死「你目前在 ACT 的心理彈性概念上自學非常充足」—— 與 theoryProgress
+  // 無關，零進度亦然。改為只指向紀錄裡確實未完成的模組／確實最低的維度；
+  // 兩者都沒有紀錄時，不作任何關於同工的宣稱。
+  const nextStepSuggestion = (() => {
+    const label = state.locale === "en" ? "💡 <strong>Next step</strong>" : "💡 <strong>下一步建議</strong>";
+    const moduleNames = { act: "接納承諾療法 (ACT)", mi: "動機式訪談法 (MI)", icf: "全人復康矩陣 (ICF)" };
+    const incomplete = ["act", "mi", "icf"].filter(k => {
+      const p = state.theoryProgress && state.theoryProgress[k];
+      return !(p && p.info && p.flashcards && p.test);
     });
-    state.radarScores = {
-      empathy: Math.round(empathySum / totalSessions),
-      changeTalk: Math.round(changeTalkSum / totalSessions),
-      defusion: Math.round(defusionSum / totalSessions),
-      icf: Math.round(icfSum / totalSessions),
-      action: Math.round(actionSum / totalSessions)
-    };
-  } else {
-    // 尚無已評估的面談。舊版在此塞入 75/60/80/45/65 並據此給出等第，
-    // 令從未做過面談的同工看到「優良 (B+)」—— 那是把寫死的分數當成他自己的
-    // 成績呈現，屬 PRD v3「No Fabricated Clinical Content」禁止之列。
-    state.radarScores = { empathy: 0, changeTalk: 0, defusion: 0, icf: 0, action: 0 };
-  }
-  const hasRadarData = totalSessions > 0;
 
-  // Calculate SVG dynamic coordinate polygon vertices (center: 100,100; max radius: 80px)
-  const scores = state.radarScores;
-  const p1 = { x: 100, y: 100 - (0.8 * scores.empathy) };
-  const p2 = { x: 100 + (0.8 * scores.changeTalk * 0.951), y: 100 - (0.8 * scores.changeTalk * 0.309) };
-  const p3 = { x: 100 + (0.8 * scores.defusion * 0.588), y: 100 + (0.8 * scores.defusion * 0.809) };
-  const p4 = { x: 100 - (0.8 * scores.icf * 0.588), y: 100 + (0.8 * scores.icf * 0.809) };
-  const p5 = { x: 100 - (0.8 * scores.action * 0.951), y: 100 - (0.8 * scores.action * 0.309) };
-  
-  const pointsStr = `${p1.x},${p1.y} ${p2.x},${p2.y} ${p3.x},${p3.y} ${p4.x},${p4.y} ${p5.x},${p5.y}`;
+    if (incomplete.length > 0) {
+      const names = incomplete.map(k => moduleNames[k]).join("、");
+      return state.locale === "en"
+        ? `${label}: ${incomplete.length} theory module(s) are still incomplete. Finishing them is the shortest next step.`
+        : `${label}：你尚有 ${incomplete.length} 個理論模組未完成（${names}）。把它們讀完是最短的下一步。`;
+    }
 
-  // Calculate dynamic cumulative grade rating
-  const totalAvg = hasRadarData ? Math.round((scores.empathy + scores.changeTalk + scores.defusion + scores.icf + scores.action) / 5) : 0;
-  let gradeText = "";
-  if (!hasRadarData) gradeText = state.locale === "en" ? "No evaluated sessions yet" : "尚無已評估的面談紀錄";
-  else if (totalAvg >= 85) gradeText = state.locale === "en" ? "Expert (A)" : "卓越 (A)";
-  else if (totalAvg >= 70) gradeText = state.locale === "en" ? "Good (B+)" : "優良 (B+)";
-  else if (totalAvg >= 55) gradeText = state.locale === "en" ? "Competent (C)" : "合格 (C)";
-  else gradeText = state.locale === "en" ? "Developing (D)" : "需提升 (D)";
+    if (record.radar) {
+      const dims = [
+        { key: "empathy", zh: "傾聽共情 (MI)", en: "Empathy (MI)" },
+        { key: "changeTalk", zh: "改變談話 (MI)", en: "Change Talk" },
+        { key: "defusion", zh: "心理解離 (ACT)", en: "Defusion (ACT)" },
+        { key: "icf", zh: "環境與個人診斷 (ICF)", en: "ICF Diagnostic" },
+        { key: "action", zh: "漸進式行動計劃", en: "Action Plan" }
+      ];
+      const weakest = dims.reduce((a, b) => (record.radar[b.key] < record.radar[a.key] ? b : a));
+      return state.locale === "en"
+        ? `${label}: across your ${record.evaluatedCount} evaluated session(s), <strong>${weakest.en}</strong> scored lowest (${record.radar[weakest.key]}). That is where more practice would show up first.`
+        : `${label}：在你 ${record.evaluatedCount} 場已評估面談中，<strong>${weakest.zh}</strong> 的平均最低（${record.radar[weakest.key]} 分）。那裡是練習最快看得見變化的地方。`;
+    }
+
+    return state.locale === "en"
+      ? `${label}: theory modules are all complete. Hold an interview with an API key to see figures computed from your own record here.`
+      : `${label}：理論模組已全部完成。以金鑰進行一次面談後，這裡會顯示來自你自己紀錄的數字。`;
+  })();
+
+  const feedbackLine = hasRadarData
+    ? (state.locale === "en"
+        ? `<strong>AI practice feedback</strong>: your ${totalSessions} evaluated session(s) average <strong>${totalAvg}</strong> across the five dimensions.`
+        : `<strong>AI 即時回饋（練習參考）</strong>：你 ${totalSessions} 場已評估面談的五維平均為 <strong>${totalAvg}</strong> 分。`)
+    : (state.locale === "en"
+        ? "No evaluated sessions yet. Once you finish an interview with an API key, the figures here will be computed from your own record."
+        : "尚無已評估的面談紀錄。完成一次有金鑰的面談後，這裡會顯示來自你自己紀錄的平均分。");
 
   // Create markup for history list
   let historyMarkup = "";
@@ -5699,11 +5842,7 @@ function renderAnalytics(container) {
         })()}
         
         <p style="font-size:0.8rem; color:var(--text-muted); line-height:1.5; margin:0;">
-          ${state.locale === "en" 
-            ? "💡 <strong>Training Recommendation</strong>: Your self-study progress on ACT is solid. We suggest focusing on MI OARS quizzes next to increase sensitivity to capturing Change Talk." 
-            : state.locale === "zh-CN"
-            ? "💡 <strong>专家培训建议</strong>：你目前在 ACT 的心理弹性概念上自学非常充足。建议接下来增加 MI OARS 匹配关关卡的通關练习，以强化对案主改变谈话（Change Talk）的捕捉敏感度。"
-            : "💡 <strong>專家培訓建議</strong>：你目前在 ACT 的心理彈性概念上自學非常充足。建議接下來增加 MI OARS 匹配關卡的通關練習，以強化對案主改變談話（Change Talk）的捕捉敏感度。"}
+          ${nextStepSuggestion}
         </p>
       </div>
 
@@ -5728,9 +5867,11 @@ function renderAnalytics(container) {
           <line x1="100" y1="100" x2="53" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
           <line x1="100" y1="100" x2="24" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
           
-          <!-- Dynamic Score Polygon -->
-          <polygon id="radar-poly" points="${pointsStr}" fill="rgba(6, 182, 212, 0.25)" stroke="var(--accent-cyan)" stroke-width="2" style="transition: points 0.5s ease-out; filter: drop-shadow(0 0 6px rgba(6,182,212,0.15));"/>
-          
+          <!-- Dynamic Score Polygon（Milestone 7：無已評估紀錄時不輸出，只留格線） -->
+          ${pointsStr
+            ? `<polygon id="radar-poly" points="${pointsStr}" fill="rgba(6, 182, 212, 0.25)" stroke="var(--accent-cyan)" stroke-width="2" style="transition: points 0.5s ease-out; filter: drop-shadow(0 0 6px rgba(6,182,212,0.15));"/>`
+            : `<text x="100" y="103" fill="var(--text-muted)" font-size="9" text-anchor="middle" style="font-weight:700;">${state.locale === "en" ? "No record yet" : "尚無紀錄"}</text>`}
+
           <!-- Interactive Dot Markers at maximum radius -->
           <circle class="radar-dot" data-dim="0" cx="100" cy="20" r="4.5" fill="var(--accent-purple)" style="cursor:pointer; transition: r 0.2s, fill 0.2s; filter:drop-shadow(0 0 4px var(--accent-purple));"></circle>
           <circle class="radar-dot" data-dim="1" cx="176" cy="76" r="4.5" fill="var(--accent-rose)" style="cursor:pointer; transition: r 0.2s, fill 0.2s; filter:drop-shadow(0 0 4px var(--accent-rose));"></circle>
@@ -5746,9 +5887,10 @@ function renderAnalytics(container) {
           <text class="radar-label" data-dim="4" x="18" y="76" fill="var(--text-muted)" font-size="8" text-anchor="end" style="cursor:pointer; font-weight:700; transition: fill 0.2s, font-size 0.2s;">${state.locale === "en" ? "Action Plan" : "漸進式行動計劃"}</text>
         </svg>
 
-        <p style="font-size:0.8rem; color:var(--text-muted); text-align:center; margin: 0 0 10px 0;">
-          累計戰力綜合評核：<strong>${gradeText}</strong>。${totalSessions > 0 ? `已完成 ${totalSessions} 次個案模擬，綜合均分為 ${totalAvg} 分。` : "點擊上方各維度標籤，即可查看專家臨床改善建議。"}
+        <p style="font-size:0.8rem; color:var(--text-muted); text-align:center; margin: 0 0 6px 0;">
+          ${feedbackLine}
         </p>
+        ${practiceSupportNoticeHTML("text-align:center; margin:0 0 10px 0;")}
 
         <!-- Dynamic Recommendation Console mounting point -->
         <div id="radar-recommendation-panel" style="width:100%; background:var(--nested-bg-medium); border:1px solid var(--card-border); border-radius:10px; padding:12px; animation:fadeIn 0.4s ease; text-align:left;">
@@ -5846,7 +5988,11 @@ function renderAnalytics(container) {
     if (!panel) return;
     
     const details = radarDimensionDetails[idx];
-    const currentScore = state.radarScores[details.scoreKey] || 0;
+    // Milestone 7：state.radarScores 為 null 代表尚無已評估紀錄，不得顯示成 0 分。
+    const currentScore = state.radarScores ? state.radarScores[details.scoreKey] : null;
+    const scoreBadgeText = currentScore === null
+      ? (state.locale === "en" ? "Not evaluated" : "未評估")
+      : `${state.locale === "en" ? "Score" : "平均"} ${currentScore} ${state.locale === "en" ? "" : "分"}`;
     
     // Highlight active label and dot in SVG
     const labels = container.querySelectorAll(".radar-label");
@@ -5868,7 +6014,7 @@ function renderAnalytics(container) {
           <i class="fa-solid fa-compass" style="color:var(--accent-cyan);"></i>
           ${details.title}
         </h4>
-        <span class="lcd-digital-badge" style="font-size:0.75rem; padding:2px 8px;">${state.locale === "en" ? "Score" : "平均"} ${currentScore} 分</span>
+        <span class="lcd-digital-badge" style="font-size:0.75rem; padding:2px 8px;">${scoreBadgeText}</span>
       </div>
       <p style="font-size:0.78rem; color:var(--text-main); line-height:1.5; margin:0 0 10px 0;">${details.desc}</p>
       <div style="background:rgba(6,182,212,0.04); border:1px solid rgba(6,182,212,0.12); padding:8px 12px; border-radius:8px; margin-bottom:10px; font-size:0.75rem; line-height:1.5; color:var(--text-bright);">
@@ -5931,6 +6077,86 @@ function renderAnalytics(container) {
   renderRadarRecommendation(0);
 }
 
+/**
+ * Milestone 7：單場面談的五維分數卡（只在該場**確實有** AI 評估時呼叫）。
+ * 座標公式與儀表板縮影、分析頁共用 radarPolygonPoints()。
+ */
+function renderSessionScoreCard(scores) {
+  const radar = {
+    empathy: scores.empathy || 0,
+    changeTalk: scores.changeTalk || 0,
+    defusion: scores.actFlexibility || 0,
+    icf: scores.icfAccuracy || 0,
+    action: scores.actionPlanning || 0
+  };
+  const rows = [
+    [state.locale === "en" ? "Empathy (MI OARS)" : "同理反映", radar.empathy],
+    [state.locale === "en" ? "Capture Change Talk" : "改變談話", radar.changeTalk],
+    [state.locale === "en" ? "ACT Flexibility" : "心理彈性", radar.defusion],
+    [state.locale === "en" ? "ICF Matrix Diagnostic" : "全人評估", radar.icf],
+    [state.locale === "en" ? "Action Planning" : "承諾行動", radar.action]
+  ];
+
+  return `
+    <div class="glass-card" style="display:flex; flex-direction:column; gap:12px; align-items:center; background:var(--nested-bg-medium); padding:16px;">
+      <h4 style="font-size:0.85rem; font-weight:800; color:var(--text-bright); align-self:flex-start;">
+        ${state.locale === "en" ? "Competence Scores" : state.locale === "zh-CN" ? "本次面谈技巧评分" : "本次面談技巧評分"}
+      </h4>
+      <svg width="180" height="180" viewBox="0 0 200 200">
+        <circle cx="100" cy="100" r="80" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+        <circle cx="100" cy="100" r="60" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+        <circle cx="100" cy="100" r="40" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+        <circle cx="100" cy="100" r="20" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
+
+        <line x1="100" y1="100" x2="100" y2="20" stroke="var(--illustration-line)" stroke-width="1"/>
+        <line x1="100" y1="100" x2="176" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
+        <line x1="100" y1="100" x2="147" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
+        <line x1="100" y1="100" x2="53" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
+        <line x1="100" y1="100" x2="24" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
+
+        <text x="100" y="15" fill="var(--text-muted)" font-size="8" text-anchor="middle">${state.locale === "en" ? "Empathy (MI)" : "同理反映"}</text>
+        <text x="182" y="76" fill="var(--text-muted)" font-size="8" text-anchor="start">${state.locale === "en" ? "Change Talk" : "改變談話"}</text>
+        <text x="152" y="175" fill="var(--text-muted)" font-size="8" text-anchor="start">${state.locale === "en" ? "Flexibility (ACT)" : "心理彈性"}</text>
+        <text x="48" y="175" fill="var(--text-muted)" font-size="8" text-anchor="end">${state.locale === "en" ? "Diagnostic (ICF)" : "全人評估"}</text>
+        <text x="18" y="76" fill="var(--text-muted)" font-size="8" text-anchor="end">${state.locale === "en" ? "Action Plan" : "承諾行動"}</text>
+
+        <polygon points="${radarPolygonPoints(radar, 80)}" fill="rgba(6, 182, 212, 0.25)" stroke="var(--accent-cyan)" stroke-width="2"/>
+      </svg>
+
+      <div style="width:100%; display:flex; flex-direction:column; gap:4px; font-size:0.75rem;">
+        ${rows.map(([label, val]) => `
+          <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
+            <span style="color:var(--text-muted);">${label}</span>
+            <span style="font-weight:700; color:var(--text-bright);">${val}</span>
+          </div>
+        `).join("")}
+      </div>
+      ${practiceSupportNoticeHTML("margin-top:4px;")}
+    </div>
+  `;
+}
+
+/** Milestone 7：未評估面談的說明卡 —— 取代舊版那張全 0 的雷達。 */
+function renderSessionNotEvaluatedCard() {
+  return `
+    <div class="glass-card" style="display:flex; flex-direction:column; gap:12px; background:var(--nested-bg-medium); padding:16px;">
+      <h4 style="font-size:0.85rem; font-weight:800; color:var(--accent-amber); display:flex; align-items:center; gap:6px;">
+        <i class="fa-solid fa-clapperboard"></i> ${state.locale === "en" ? "Not evaluated" : "本次面談未經評估"}
+      </h4>
+      <p style="font-size:0.8rem; color:var(--text-main); line-height:1.6; margin:0;">
+        ${state.locale === "en"
+          ? "This session ran in offline demo mode, so there is no AI clinical evaluation — no scores, no radar, no supervisor summary. The transcript and the notes you wrote are real and are shown in the other tabs."
+          : "本次面談在<b>離線示範模式</b>下進行，沒有 AI 臨床評估 —— 沒有評分、沒有雷達圖、沒有督導總結。其他分頁的逐字紀錄與你自己撰寫的日誌是真實內容。"}
+      </p>
+      <p style="font-size:0.78rem; color:var(--text-muted); line-height:1.6; margin:0;">
+        ${state.locale === "en"
+          ? "To have future sessions evaluated, set a Gemini API key in Settings."
+          : "若要讓日後的面談產生評估，請在「系統設定」中填入 Gemini API 金鑰。"}
+      </p>
+    </div>
+  `;
+}
+
 function showSessionDetailPopup(session) {
   // Play click sound
   AudioSynth.playClick();
@@ -5945,9 +6171,14 @@ function showSessionDetailPopup(session) {
   }
 
   const evaluated = hasEvaluation(session);
-  const { empathy, changeTalk, actFlexibility, icfAccuracy, actionPlanning } =
-    evaluated ? session.report.scores : { empathy: 0, changeTalk: 0, actFlexibility: 0, icfAccuracy: 0, actionPlanning: 0 };
-  
+
+  // D20(b)：舊版在未評估時把五維解構為 0，然後照樣畫雷達與「同理反映 0 / 改變談話 0」，
+  // 標題仍是「本次面談技巧評分」。收縮到圓心的五邊形讀起來是「這場拿了 0 分」，
+  // 而事實是這場從未被評估。零填充的解構整個刪除 —— 它就是缺陷本身。
+  const scoreBlockHTML = evaluated
+    ? renderSessionScoreCard(session.report.scores)
+    : renderSessionNotEvaluatedCard();
+
   // Render full detailed portfolio
   overlay.innerHTML = `
     <div class="popup-content">
@@ -5972,84 +6203,20 @@ function showSessionDetailPopup(session) {
         <!-- Section 1: Supervisor Report Tab Content -->
         <div class="popup-tab-content" id="popup-content-report">
           <div class="grid-2col" style="gap: 16px;">
-            <!-- Radar representation -->
-            <div class="glass-card" style="display:flex; flex-direction:column; gap:12px; align-items:center; background:var(--nested-bg-medium); padding:16px;">
-              <h4 style="font-size:0.85rem; font-weight:800; color:var(--text-bright); align-self:flex-start;">
-                ${state.locale === "en" ? "Competence Scores" : state.locale === "zh-CN" ? "本次面谈技巧评分" : "本次面談技巧評分"}
-              </h4>
-              <svg width="180" height="180" viewBox="0 0 200 200">
-                <circle cx="100" cy="100" r="80" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
-                <circle cx="100" cy="100" r="60" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
-                <circle cx="100" cy="100" r="40" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
-                <circle cx="100" cy="100" r="20" fill="none" stroke="var(--illustration-line-faint)" stroke-width="1"/>
-                
-                <line x1="100" y1="100" x2="100" y2="20" stroke="var(--illustration-line)" stroke-width="1"/>
-                <line x1="100" y1="100" x2="176" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
-                <line x1="100" y1="100" x2="147" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
-                <line x1="100" y1="100" x2="53" y2="165" stroke="var(--illustration-line)" stroke-width="1"/>
-                <line x1="100" y1="100" x2="24" y2="76" stroke="var(--illustration-line)" stroke-width="1"/>
-                
-                <!-- Axis Labels -->
-                <text x="100" y="15" fill="var(--text-muted)" font-size="8" text-anchor="middle">${state.locale === "en" ? "Empathy (MI)" : "同理反映"}</text>
-                <text x="182" y="76" fill="var(--text-muted)" font-size="8" text-anchor="start">${state.locale === "en" ? "Change Talk" : "改變談話"}</text>
-                <text x="152" y="175" fill="var(--text-muted)" font-size="8" text-anchor="start">${state.locale === "en" ? "Flexibility (ACT)" : "心理彈性"}</text>
-                <text x="48" y="175" fill="var(--text-muted)" font-size="8" text-anchor="end">${state.locale === "en" ? "Diagnostic (ICF)" : "全人評估"}</text>
-                <text x="18" y="76" fill="var(--text-muted)" font-size="8" text-anchor="end">${state.locale === "en" ? "Action Plan" : "承諾行動"}</text>
-                
-                ${(() => {
-                  const r_emp = empathy * 0.8;
-                  const r_chg = changeTalk * 0.8;
-                  const r_act = actFlexibility * 0.8;
-                  const r_icf = icfAccuracy * 0.8;
-                  const r_actPln = actionPlanning * 0.8;
-                  
-                  const p1 = `100,${100 - r_emp}`;
-                  const p2 = `${100 + r_chg * Math.cos(-18 * Math.PI / 180)},${100 + r_chg * Math.sin(-18 * Math.PI / 180)}`;
-                  const p3 = `${100 + r_act * Math.cos(54 * Math.PI / 180)},${100 + r_act * Math.sin(54 * Math.PI / 180)}`;
-                  const p4 = `${100 + r_icf * Math.cos(126 * Math.PI / 180)},${100 + r_icf * Math.sin(126 * Math.PI / 180)}`;
-                  const p5 = `${100 + r_actPln * Math.cos(198 * Math.PI / 180)},${100 + r_actPln * Math.sin(198 * Math.PI / 180)}`;
-                  
-                  return `<polygon points="${p1} ${p2} ${p3} ${p4} ${p5}" fill="rgba(6, 182, 212, 0.25)" stroke="var(--accent-cyan)" stroke-width="2"/>`;
-                })()}
-              </svg>
-              
-              <div style="width:100%; display:flex; flex-direction:column; gap:4px; font-size:0.75rem;">
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
-                  <span style="color:var(--text-muted);">${state.locale === "en" ? "Empathy (MI OARS)" : "同理反映"}</span>
-                  <span style="font-weight:700; color:var(--text-bright);">${empathy}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
-                  <span style="color:var(--text-muted);">${state.locale === "en" ? "Capture Change Talk" : "改變談話"}</span>
-                  <span style="font-weight:700; color:var(--text-bright);">${changeTalk}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
-                  <span style="color:var(--text-muted);">${state.locale === "en" ? "ACT Flexibility" : "心理彈性"}</span>
-                  <span style="font-weight:700; color:var(--text-bright);">${actFlexibility}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
-                  <span style="color:var(--text-muted);">${state.locale === "en" ? "ICF Matrix Diagnostic" : "全人評估"}</span>
-                  <span style="font-weight:700; color:var(--text-bright);">${icfAccuracy}</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; border-bottom:1px dashed var(--card-border);">
-                  <span style="color:var(--text-muted);">${state.locale === "en" ? "Action Planning" : "承諾行動"}</span>
-                  <span style="font-weight:700; color:var(--text-bright);">${actionPlanning}</span>
-                </div>
-              </div>
-            </div>
+            <!-- Milestone 7：有評估畫分數卡，無評估畫說明卡，不再以 0 填充 -->
+            ${scoreBlockHTML}
 
-            <!-- Report summary feedback -->
+            <!-- Report summary feedback（Milestone 7：未評估時整塊略去，
+                 說明已由左側說明卡承擔，重覆兩次反而模糊了訊息） -->
+            ${evaluated ? `
             <div style="display:flex; flex-direction:column; gap:12px;">
               <h4 style="font-size:0.9rem; font-weight:800; color:var(--text-bright); display:flex; align-items:center; gap:6px;">
                 <i class="fa-solid fa-user-tie" style="color:var(--accent-cyan);"></i> ${state.locale === "en" ? "Clinical Summary Feedback" : "督導意見總結"}
               </h4>
               <p style="font-size:0.8rem; color:var(--text-main); line-height:1.6; background:var(--nested-bg-faint); padding:12px; border-radius:8px; border-left:4px solid var(--accent-cyan); max-height:220px; overflow-y:auto;">
-                ${evaluated
-                  ? session.report.summary.replace(/\n/g, "<br>")
-                  : (state.locale === "en"
-                      ? "This session ran in offline demo mode, so there is no AI clinical evaluation — no scores and no supervisor summary. The transcript and notes above are real."
-                      : "本次面談在<b>離線示範模式</b>下進行，沒有 AI 臨床評估，因此沒有評分與督導總結。上方的逐字紀錄與日誌為真實內容。")}
+                ${session.report.summary.replace(/\n/g, "<br>")}
               </p>
-            </div>
+            </div>` : ""}
           </div>
         </div>
 
@@ -6538,8 +6705,10 @@ function renderSettings(container) {
       localStorage.removeItem("rehab_sessions_history");
       localStorage.removeItem("rehab_custom_cases");
       localStorage.removeItem("rehab_unlocked_achievements");
+      // 兩鍵已於 Milestone 7 停用（D7），此處仍移除以清掉舊安裝的殘留值。
       localStorage.removeItem("rehab_completed_cases_count");
       localStorage.removeItem("rehab_completed_case_ids");
+      localStorage.removeItem("rehab_m7_achievement_reconcile");
       localStorage.removeItem("rehab_selected_voice");
       localStorage.removeItem("rehab_speech_muted");
       localStorage.removeItem("rehab_theory_progress");
@@ -6553,8 +6722,7 @@ function renderSettings(container) {
       // 3. Reset state properties to defaults
       state.cases = [...MOCK_CASES];
       state.unlockedAchievements = [];
-      state.completedCasesCount = 0;
-      state.completedCaseIds = [];
+      state.achievementsReconciledCount = 0;
       state.activeCase = null;
       state.activeSession = null;
       state.miGameScore = 0;
@@ -6609,10 +6777,22 @@ function renderSettings(container) {
 
 function renderAchievementsWall() {
   const unlocked = state.unlockedAchievements;
+
+  // Milestone 7 §3.7：對帳曾收回徽章時，說明一次。不解釋就消失比留著假徽章更難理解。
+  const reconcileNotice = state.achievementsReconciledCount > 0
+    ? `<div class="achievement-reconcile-notice">
+         <i class="fa-solid fa-circle-info"></i>
+         ${state.locale === "en"
+           ? `The unlock criteria for ${state.achievementsReconciledCount} badge(s) have been corrected to match what each badge claims. Badges whose criteria your record does not meet have been returned to locked, and can be earned again.`
+           : `有 ${state.achievementsReconciledCount} 個徽章的達成條件已更正為與徽章描述一致。你的紀錄尚未符合的，已回到未解鎖狀態，可以重新達成。`}
+       </div>`
+    : "";
+
   return `
     <div class="achievement-section-title">
       <i class="fa-solid fa-trophy" style="color:var(--accent-amber);"></i> 職業復康同工成就徽章牆
     </div>
+    ${reconcileNotice}
     <div class="achievement-grid">
       ${MOCK_ACHIEVEMENTS.map(ach => {
         const isUnlocked = unlocked.includes(ach.id);
@@ -6634,11 +6814,129 @@ function renderAchievementsWall() {
   `;
 }
 
+/** MI 闖關的滿分：各題最高分選項之和。由題庫算出，Training Lead 增減題目自動跟隨。 */
+function miDrillMaxScore(oarsGame) {
+  if (!Array.isArray(oarsGame)) return 0;
+  return oarsGame.reduce((total, q) => {
+    const best = (q.options || []).reduce((m, o) => Math.max(m, o.score || 0), 0);
+    return total + best;
+  }, 0);
+}
+
+/** 三個理論模組（info / flashcards / test）是否全部完成。 */
+function allTheoryModulesComplete() {
+  return ["act", "mi", "icf"].every(k => {
+    const p = state.theoryProgress && state.theoryProgress[k];
+    return !!(p && p.info && p.flashcards && p.test);
+  });
+}
+
+/**
+ * Milestone 7：徽章條件的**單一判定點**。
+ *
+ * 回傳 true / false / null：
+ *  - true  = 紀錄顯示已達標
+ *  - false = 紀錄顯示未達標
+ *  - null  = **沒有可查證的持久紀錄**，無法判定（ICF 沙盒結果不落地；
+ *            自定義個案可被刪除）。null 者一律沿用既有鎖存值，不撤銷也不代發。
+ *
+ * 完整由保險箱推導（ARCHITECTURE §7 D21 的餘下部分）需要逐題練習紀錄（D26），
+ * 屬另一個里程碑。此處先讓**條件與描述一致**，並讓可查證者真的被查證。
+ */
+function evaluateAchievement(achId, record) {
+  const rec = record || computeCounselorRecord(state.historySessions);
+
+  switch (achId) {
+    // 描述：「成功完成第一次案主模擬對話並生成評估報告」——「評估報告」是條件的一部分。
+    case "first_session":
+      return rec.evaluatedCount >= 1;
+
+    // 描述：「同理心 (MI OARS) 評定達到 90 分或以上」
+    case "empathy_master":
+      return rec.evaluatedSessions.some(s => (s.report.scores.empathy || 0) >= 90);
+
+    // 描述：「累積完成 3 次不同案主的全套輔導對話」
+    case "combat_specialist":
+      return rec.distinctCaseIds.size >= 3;
+
+    // 描述：「ACT、MI、ICF 三個理論模組全部完成，且 OARS 闖關每一題都選中最高分回應」
+    case "theory_explorer": {
+      // 理論模組進度是持久的（rehab_theory_progress），任何時候都可查證。
+      // 未完成 = 有紀錄證明未達標 → false，對帳時可據此收回。
+      if (!allTheoryModulesComplete()) return false;
+
+      const oarsGame = MOCK_THEORY_DATA.mi && MOCK_THEORY_DATA.mi.oars_game;
+      const maxScore = miDrillMaxScore(oarsGame);
+      if (maxScore <= 0) return null;
+
+      // ⚠️ 闖關分數只存在於記憶體（miGameScore／miGameIndex 開機歸零），沒有持久紀錄。
+      // 本次尚未走完闖關時，我們**不知道**同工過去有沒有滿分通過 —— 那是 null
+      // （無從查證），不是 false。若在此回 false，每次重新整理都會把上一輪合法
+      // 取得的徽章收掉。逐題練習紀錄（D26）落地後，這裡才能改成真正可查證。
+      const finished = state.miGameIndex >= (oarsGame.length || 0);
+      if (!finished) return null;
+
+      return state.miGameScore >= maxScore;
+    }
+
+    // ICF 沙盒結果與自定義個案的建立事件都沒有持久紀錄可查。
+    case "icf_expert":
+    case "case_creator":
+      return null;
+
+    default:
+      return null;
+  }
+}
+
+/**
+ * Milestone 7 §3.7：一次性徽章對帳。
+ * 對**條件可查證**的徽章重新判定，不符者收回；null（無可查證紀錄）者原樣保留。
+ * 只跑一次，旗標寫入既有的 app_meta store（不需 DB 版本變更）。
+ */
+const ACHIEVEMENT_RECONCILE_FLAG = "m7_achievement_reconcile";
+
+async function reconcileAchievementsOnce() {
+  try {
+    if (state.vaultMode === "indexeddb") {
+      // ⚠️ getMeta() 回傳的是 **value 本身**（`req.result.value`），不是 `{key, value}`
+      //    記錄。寫成 done.value.done 會永遠是 undefined，旗標形同不存在，對帳
+      //    每次開機都重跑 —— 效果上冪等所以看不出來，但「只跑一次」的承諾沒有兌現。
+      const done = await RehabCounselorDB.getMeta(ACHIEVEMENT_RECONCILE_FLAG);
+      if (done && done.done) return;
+    } else if (localStorage.getItem("rehab_m7_achievement_reconcile") === "done") {
+      return;
+    }
+
+    const record = computeCounselorRecord(state.historySessions);
+    const revoked = state.unlockedAchievements.filter(id => evaluateAchievement(id, record) === false);
+
+    if (revoked.length > 0) {
+      state.unlockedAchievements = state.unlockedAchievements.filter(id => !revoked.includes(id));
+      localStorage.setItem("rehab_unlocked_achievements", JSON.stringify(state.unlockedAchievements));
+      state.achievementsReconciledCount = revoked.length;
+    }
+
+    if (state.vaultMode === "indexeddb") {
+      await RehabCounselorDB.setMeta(ACHIEVEMENT_RECONCILE_FLAG, { done: true, at: new Date().toISOString(), revoked });
+    } else {
+      localStorage.setItem("rehab_m7_achievement_reconcile", "done");
+    }
+  } catch (err) {
+    // 對帳失敗不得阻擋開機 —— 徽章維持原樣，下次開機再試。
+    console.warn("徽章對帳未完成：", err);
+  }
+}
+
 function checkAndUnlockAchievements(achId) {
   if (state.unlockedAchievements.includes(achId)) return;
-  
+
   const ach = MOCK_ACHIEVEMENTS.find(a => a.id === achId);
   if (!ach) return;
+
+  // Milestone 7：可查證的條件必須真的成立才發。null（無持久紀錄可查）者
+  // 沿用呼叫端的判斷 —— 那是它當下觀察到的事實（如 ICF 沙盒 100% 正確）。
+  if (evaluateAchievement(achId) === false) return;
 
   state.unlockedAchievements.push(achId);
   localStorage.setItem("rehab_unlocked_achievements", JSON.stringify(state.unlockedAchievements));
@@ -6864,7 +7162,8 @@ function exportSessionReport(report, historicalSession = null) {
         `- 全人障礙與環境評估 (ICF Matrix)：${report.scores.icfAccuracy} 分\n` +
         `- 承諾行動計劃可行性：${report.scores.actionPlanning} 分\n\n` +
         `## 💬 臨床督導總結 (Supervisor Feedback)\n` +
-        `${report.summary}\n\n`
+        `${report.summary}\n\n` +
+        `> ${PRACTICE_SUPPORT_NOTICE}\n\n`
       : `## 📊 督導評估成績\n` +
         `本次面談在**離線示範模式**下進行，沒有 AI 臨床評估，因此沒有評分與督導總結。\n` +
         `以下的逐字紀錄與面談日誌為真實內容。\n\n`) +

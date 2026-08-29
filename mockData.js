@@ -779,7 +779,7 @@ export const MOCK_ACHIEVEMENTS = [
     id: "first_session",
     name: "初試啼聲",
     icon: "fa-trophy",
-    description: "成功完成第一次案主模擬對話並生成評估報告。",
+    description: "完成第一次案主模擬對話，並取得 AI 臨床評估報告（離線示範沒有評估，不計）。",
     color: "var(--accent-purple)"
   },
   {
@@ -807,7 +807,7 @@ export const MOCK_ACHIEVEMENTS = [
     id: "theory_explorer",
     name: "知識探險家",
     icon: "fa-book-open",
-    description: "深入研讀 ACT、MI、ICF 理論子分頁並完美通過 OARS 闖關遊戲。",
+    description: "ACT、MI、ICF 三個理論模組全部完成，且 OARS 闖關每一題都選中最高分回應。",
     color: "var(--accent-amber)"
   },
   {
@@ -846,7 +846,7 @@ export const TRANSLATIONS = {
     "mystery_box_click": "點擊抽取神秘案主卡",
     "mystery_box_sub": "抽卡即刻啟動對話模擬",
     "mini_radar_title": "個人能力值縮影 (Competence Radar)",
-    "mini_radar_desc": "平台整合自學表現與 SOAP 評核的雷達圖：",
+    "mini_radar_desc": "來自你已評估面談的五維平均：",
     "counseling_room_title": "模擬輔導室",
     "counseling_room_subtitle": "請扮演職業復康就業導師，使用 MI & ACT 技巧進行就業輔導與諮商。",
     "api_status_badge_online": "AI 在線模式",
@@ -891,7 +891,7 @@ export const TRANSLATIONS = {
     "mystery_box_click": "点击抽取神秘案主卡",
     "mystery_box_sub": "抽卡即刻启动对话模拟",
     "mini_radar_title": "个人能力值缩影 (Competence Radar)",
-    "mini_radar_desc": "平台整合自学表现与 SOAP 评核的雷达图：",
+    "mini_radar_desc": "来自你已评估面谈的五维平均：",
     "counseling_room_title": "模拟辅导室",
     "counseling_room_subtitle": "请扮演职业复康就业导师，使用 MI & ACT 技巧进行就业辅导与谘商。",
     "api_status_badge_online": "AI 在线模式",
@@ -936,7 +936,7 @@ export const TRANSLATIONS = {
     "mystery_box_click": "Click to Draw a Mystery Case",
     "mystery_box_sub": "Draw to instantly launch dialogue simulation",
     "mini_radar_title": "Competence Radar Overview",
-    "mini_radar_desc": "Integrated radar chart from theory progression and SOAP assessments:",
+    "mini_radar_desc": "Averaged across your evaluated sessions:",
     "counseling_room_title": "Roleplay Simulator",
     "counseling_room_subtitle": "Please play the role of vocational rehab counselor, using MI & ACT to conduct counseling.",
     "api_status_badge_online": "AI Online Mode",

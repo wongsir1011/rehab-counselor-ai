@@ -1,7 +1,7 @@
 # Architecture: RehabCounselor AI
 
 > **Status**: Living Architecture Document (SSOT for Code Structure & Technical Design)  
-> **Last Reconciled**: 2026-08-27 23:14 HKT (UTC+8) — full PRD↔code audit; see §7 for drift found
+> **Last Reconciled**: 2026-08-29 HKT (UTC+8) — Milestone 7 built; see §7 for drift found and closed
 
 ---
 
@@ -111,6 +111,12 @@ initApp()  →  await hydrateVault()  →  switchView("dashboard")   // first re
 
 **Backup / restore** — Settings → 資料保險箱 exports the full vault (sessions, custom cases, achievements, theory progress, non-secret settings) as `RehabCounselor_Vault_YYYY-MM-DD.json`, and restores it as an overwrite (validate → `clearAll()` → write). The Danger Zone reset offers a backup export before its two destructive confirmations, and calls `clearAll()` so reset data does not resurrect on the next boot.
 
+**Derived values (Milestone 7)** — every number the interface states about the counselor is computed in one place, `computeCounselorRecord(historySessions)` in `app.js`, which returns `{ totalSessions, evaluatedSessions, evaluatedCount, distinctCaseIds, userTurns, radar, radarAverage }`. The dashboard, the analytics page, the longitudinal trend chart and the achievement predicates all read it; none of them aggregates on its own.
+
+`radar` and `radarAverage` are **`null`, not `0`, when no session carries an AI evaluation**. This is deliberate and structural: D20 happened because "not evaluated" was written as `0`, then flowed silently into a coordinate formula and drew a pentagon collapsed at the centre — which reads as "this counselor scored zero". `null` breaks that formula instead of lying, so each consumer is forced to render an explicit "no record yet" state. `radarPolygonPoints(radar, maxRadius)` returns `null` for a `null` radar and the caller emits no `<polygon>`.
+
+The `completedCasesCount` / `completedCaseIds` `localStorage` copies were **deleted** in the same pass (D7). The `sessions` object store is the only home; `buildBackupJSON()` still emits the `completedCount` / `completedIds` backup fields under their original names, but computes them from `sessions`, and `importFullBackupJSON()` ignores them on restore because they are derived. Backup format version and field names are unchanged, so older backups still restore.
+
 ---
 
 ## 7. Known Drift: Code vs. PRD (audited 2026-08-27 23:14 HKT against PRD v1; re-based on PRD v3 at 23:28 HKT)
@@ -132,7 +138,7 @@ A full clause-by-clause audit of `PRD.md` against `origin/main` (`1d531a5`, byte
 
 | ID | Drift | Note |
 | :--- | :--- | :--- |
-| D7 | Completed-session count has three parallel homes: `sessions` store (authoritative), `rehab_completed_cases_count`, `rehab_completed_case_ids` | SSOT breach; kept in sync by three adjacent assignments in `app.js:4323-4328` |
+| ~~D7~~ | ~~Completed-session count has three parallel homes~~ | **RESOLVED (M7, 2026-08-29)**: both `localStorage` copies deleted. `rehab_completed_cases_count` had **zero** readers; `rehab_completed_case_ids` had one (the 實戰特工 badge), now `computeCounselorRecord().distinctCaseIds`. The `sessions` store is the only home. Backup round-trip verified identical before/after restore. |
 | D8 | MiniMax diagnostics persist a masked key (first 5 + last 4 chars) and a plaintext Group ID to `localStorage` with no expiry | `app.js:3940`, `3970`, `3973`. Excluded from vault backups. |
 | ~~D9~~ | ~~Five shipped feature areas absent from `PRD.md`~~ | **RESOLVED by PRD v3 (2026-08-27 23:28 HKT)**: Theory Hub, group projector study, MI staged drills and achievements are now written into USER JOURNEY steps 1 and 5. Motivational quotes were deliberately left out as interface garnish, not product intent. |
 | ~~D10~~ | ~~Generator exposes four parameters where the PRD named three; "verified" dialogue characteristics had no verification step~~ | **RESOLVED by PRD v3**: journey step 2 now names all four parameters, and the unbacked word "verified" was dropped. |
@@ -145,10 +151,10 @@ PRD v3 tightened several clauses and added one wholly new obligation. Measured a
 
 | ID | PRD v3 clause | Code status |
 | :--- | :--- | :--- |
-| D13 | **Usage Guardrail** — a per-counselor daily cap on model calls, shown in settings with the remaining budget | **Not built at all.** No call counter, no cap, no settings surface. Scheduled into **Milestone 8** by owner decision on 2026-08-27. |
+| D13 | **Usage Guardrail** — a per-counselor daily cap on model calls, shown in settings with the remaining budget | **Not built at all.** No call counter, no cap, no settings surface. Scheduled by owner decision on 2026-08-27 into the milestone that is **Milestone 9** after the 2026-08-29 renumbering. |
 | ~~D14~~ | ~~Scripted demo turns must be visibly marked; scriptless cases must not be roleplayable without a key~~ | **RESOLVED (M6)**: every scripted bubble carries a "示範劇本" badge and an amber left border; `history[].scripted` persists into the vault so the session-detail popup and the Markdown export both mark demo turns for the supervisor; scriptless cases are blocked at entry. |
 | ~~D1′~~ | ~~Supervisor hint visible by default on arrival~~ | **RESOLVED (M5)**, verified in-browser: hint readable with no click on the first turn. |
-| D6′ | Interface **must never claim a draft is saved when it is not** (v1 implied only the storage location) | The "已安全備份" indicator still makes the false claim. Milestone 7 must remove or truth-up the indicator, not only add the leave-guard. |
+| D6′ | Interface **must never claim a draft is saved when it is not** (v1 implied only the storage location) | The "已安全備份" indicator still makes the false claim. **Milestone 8** must remove or truth-up the indicator, not only add the leave-guard. (Renumbered 2026-08-29 when M7「每個數字都來自你的紀錄」was inserted; the drift is unchanged.) |
 
 ### Findings from the Milestone 5 peer review (2026-08-28 02:26 HKT)
 
@@ -175,7 +181,7 @@ Aggregates now exclude unevaluated sessions from the **denominator** rather than
 
 | ID | Finding | Evidence |
 | :--- | :--- | :--- |
-| **D20** | **"Not evaluated" is rendered as "scored zero" in three places.** The F1 fix removed the flattering fabrication but left its mirror image: a session that was never evaluated is drawn as a zero score, which is equally untrue. (a) **Dashboard** `app.js:800-802` gates the average on `historySessions.length > 0` rather than on the evaluated count, so a counselor whose vault holds only offline demo sessions sees **「0分」** and an empty ring. (b) **Session-detail popup** `app.js:5947` onward still renders the whole radar block under the heading 「本次面談技巧評分」 using the zero-filled destructuring — a pentagon collapsed at the centre reads as "this session scored zero", not "this session was not evaluated"; only the adjacent summary text was fixed. (c) **Analytics radar** `app.js:5581`/`5732` still plots the polygon from the all-zero `state.radarScores`, though the grade line beside it does correctly read 「尚無已評估的面談紀錄」. | (a) proven by evaluating the expression with `historySessions = [{report:null}]` → renders `0分` where `—` is correct. (b) and (c) proven by reading the templates: the score block and the polygon are unconditional. **Not visually confirmed** — see the note below. |
+| ~~**D20**~~ | **RESOLVED (M7, 2026-08-29)** — and it was **four** places, not three: the longitudinal trend chart gated `isSimulated` on `historySessions.length < 2`, so two offline demo sessions removed the「模擬成長對照引導線」badge while `filter(hasEvaluation)` left the series empty — a chart with no badge, no data points, presented as the counselor's own. All four now branch on the evaluated count. Verified in a real browser with a vault holding only unevaluated sessions: dashboard shows `—`, the analytics radar draws no polygon, the detail popup shows an explanation card instead of a zero pentagon, and the trend chart keeps its simulated badge. *Original finding:* **"Not evaluated" is rendered as "scored zero" in three places.** The F1 fix removed the flattering fabrication but left its mirror image: a session that was never evaluated is drawn as a zero score, which is equally untrue. (a) **Dashboard** `app.js:800-802` gates the average on `historySessions.length > 0` rather than on the evaluated count, so a counselor whose vault holds only offline demo sessions sees **「0分」** and an empty ring. (b) **Session-detail popup** `app.js:5947` onward still renders the whole radar block under the heading 「本次面談技巧評分」 using the zero-filled destructuring — a pentagon collapsed at the centre reads as "this session scored zero", not "this session was not evaluated"; only the adjacent summary text was fixed. (c) **Analytics radar** `app.js:5581`/`5732` still plots the polygon from the all-zero `state.radarScores`, though the grade line beside it does correctly read 「尚無已評估的面談紀錄」. | (a) proven by evaluating the expression with `historySessions = [{report:null}]` → renders `0分` where `—` is correct. (b) and (c) proven by reading the templates: the score block and the polygon are unconditional. **Not visually confirmed** — see the note below. |
 
 These are one defect in three locations and must be fixed in a single pass; fixing them separately would repeat the narrow-fix mistake that produced this finding. **Scheduled into Milestone 7「每個數字都來自你的紀錄」on 2026-08-29**, together with the hardcoded dashboard "Competence Radar", the unconditional mastery claim at the end of the MI drill, and the mismatched「知識探險家」badge — all four are the same pattern: a claim about the counselor that is not computed from their record. Traces to the same PRD clause as D18: presenting the counselor with a clinical conclusion that does not exist.
 
@@ -189,7 +195,7 @@ Audited against `PRD.md` **v3** on disk — the v4 draft raised the same day was
 
 | ID | Finding | Evidence |
 | :--- | :--- | :--- |
-| **D21** | **Achievements are not computed from the vault.** The SSOT clause names *"progress milestones"* among the derived values that must be computed from the vault, but `rehab_unlocked_achievements` is read from and written to `localStorage` (`app.js:40`, `472`, `6540`). This extends D7, which covered only the session count and the completed-case id list. | Radar aggregates *were* fixed (three `filter(hasEvaluation)` sites); milestones were not. |
+| **D21** | **Achievements are not computed from the vault** — *partly closed (M7, 2026-08-29)*. Criteria now live in one predicate, `evaluateAchievement(id, record)`, which returns `true` / `false` / **`null`**. Four of six badges are decided from the vault (`first_session`, `empathy_master`, `combat_specialist`) or from persisted theory progress (`theory_explorer`, module half). `icf_expert` and `case_creator` return `null` — **no durable record exists** for an ICF sandbox run or a case-creation event — and the MI drill score half of `theory_explorer` is also `null` outside the session that ran it, because `miGameScore` lives only in memory. `null` means "cannot verify", and such badges are never revoked. Storage is still `rehab_unlocked_achievements` in `localStorage`. | **Residual distance**: full derivation needs the item-level practice record (**D26**), which is a separate milestone. Until then the latch is the only home for two badges. |
 | D22 | **Partly resolved by PRD v4 (2026-08-29).** The three-locale switcher (**170** `state.locale` branches in `app.js`) is now settled the other way: v4 places localized clinical content **out of scope** — Traditional Chinese (HK) only — so the English and Simplified options must be **removed**, a deliberate and visible narrowing. The motivational-quote carousel (4 references) remains outside the PRD; v4 continues to omit it deliberately, so the carousel should be removed rather than documented. | Neither removal is built yet. |
 | D23 | Semantic gaps rather than violations, logged for completeness: the PRD's *"staged MI practice drills"* is satisfied only in the sense of ten sequential items — the drill data carries no change-stage field (`stage`/「階段」 absent from `oars_game`); and the ACT self-test passes on keyword matching, though the PRD specifies only *"self-tests"* without depth. | Not counted as drift. |
 
@@ -207,8 +213,25 @@ Tightening the PRD moves the code further from it. These are deliberately record
 | **D27** | The exported session report carries, turn by turn, the guidance the AI gave | **Not built.** `coachHint` is never written to `state.activeSession.history`, and `exportSessionReport()` references it zero times. A supervisor cannot audit what the AI told the counselor. |
 | **D28** | **Honest Simulation** — the simulated client must not be a deterministic reward function | **Not built.** `geminiService.js` instructs the client to soften *only* when correct technique is used, and to harden when lectured — a fixed technique→compliance contingency. |
 | **D29** | **Teaching Material Is Data** — extendable by a Training Lead without code changes | **Not built.** All content is hardcoded in the 961-line `mockData.js` ES module; adding one drill item or case requires editing code and redeploying. |
-| **D30** | **No Claim Without Evidence** — no letter grades; every claim computed from the counselor's own record | Partly built. Radar aggregates were fixed in the F1 pass, but the hardcoded dashboard radar, the unconditional mastery message, the mismatched badge, and the A/B+/C/D grades all remain — this is the cluster already scheduled as **Milestone 7**. |
+| ~~D30~~ | ~~**No Claim Without Evidence** — no letter grades; every claim computed from the counselor's own record~~ | **RESOLVED (M7, 2026-08-29)**: the four letter grades are gone; the hardcoded dashboard radar polygon and its "極佳 (A) / 優良 (B+)" footer are computed from the record or say 「尚無已評估的面談紀錄」; the MI drill states `score / max` with a verdict matched to the actual ratio; badge criteria match their descriptions; and the practice-support statement appears at all five score/guidance surfaces including the exported report. Four further same-pattern claims found during the build were fixed with it — see the M7 row below. |
 | **D31** | **Security & Secrets** — model output rendered as text, never as markup | **Not built.** `app.js:3884` still assigns `coachHint` through `innerHTML`. Already scheduled as part of Milestone 9. |
+
+### Findings from the Milestone 7 build (2026-08-29)
+
+Four additional claims of the same family were found by reading the code during the build and fixed in the same pass. They were never separately numbered because they are the same defect as D30, in different locations.
+
+| Location | Claim it made | Now |
+| :--- | :--- | :--- |
+| `mockData.js` `mini_radar_desc` | 「平台整合自學表現與 **SOAP 評核**的雷達圖」 | No code path ever integrated self-study progress or SOAP notes into that chart. Reworded to name its real source: the counselor's evaluated sessions. |
+| Analytics 「專家培訓建議」 | 「你目前在 ACT 的心理彈性概念上**自學非常充足**」, hardcoded — shown at 0/9 modules | Derived: names the theory modules actually incomplete, or the lowest-scoring dimension in the record; makes no claim when there is neither. |
+| Co-Learning Studio closing panel | 「同工小組…**深化了**對於 MI…的實戰心得」, regardless of answers | States the item count completed and points at the next activity. |
+| 「初試啼聲」 badge | Description says *"and generated an evaluation report"*, but it was granted after offline sessions that have no evaluation | Criterion now requires an evaluated session, matching the description. |
+
+**A second bug was caught by the peer-review read, not by the tests**: `reconcileAchievementsOnce()` checked its once-only flag as `done.value.done`, but `RehabCounselorDB.getMeta()` returns the **value itself** (`req.result.value`), not the `{key, value}` record — so the flag never matched and reconciliation re-ran on every boot. It is idempotent in effect, which is exactly why the first round of tests passed for the wrong reason. Fixed to `done.done` and re-verified across two boots with the badge deliberately re-seeded in between.
+
+**One bug was caught by the milestone's own test, not by reading the code**: the first version of `evaluateAchievement("theory_explorer")` returned `false` when the MI drill had not been run in the current session — so a legitimately earned badge was revoked on **every page reload**, because `miGameScore` resets to 0 on boot. The predicate now returns `null` (cannot verify) in that case and `false` only when the *persisted* theory progress proves non-compliance. Re-verified: badge retained across reloads when theory modules are complete, revoked when they are not.
+
+**The one-time reconciliation** (`reconcileAchievementsOnce()`, flagged in `app_meta`) revokes only badges whose criteria are verifiably unmet, shows a one-time explanation on the badge wall, and is idempotent — verified by seeding all six badges against a record that justifies four.
 
 ### Confirmed sound
 
@@ -228,7 +251,7 @@ Recorded because these numbers explain why visual consistency is expensive to ma
 Two consequences follow directly:
 
 1. **No scale can hold.** Across `app.js` and `index.css` there are **418** `font-size` declarations using **45 distinct sizes**; **219 of them — over half — sit between 0.70rem and 0.85rem**, six steps inside a 2.4px range, which cannot express hierarchy. Spacing uses **20** distinct px values (including 1, 2, 3, 5, 7px), border-radius **11**, and there are **6** ad-hoc breakpoints (420/500/650/768/900/950px).
-2. **The light theme cannot fully apply.** Inline styles outrank any selector, and **155** colour literals are hardcoded inside them (most frequently `rgba(255,255,255,0.02)` and `rgba(255,255,255,0.05)`, 11 times each — white surface tints that create depth on a dark ground and vanish on a light one). `index.css` carries only **34** `[data-theme="light"]` override rules against 366 class selectors. Inline styles do also use design tokens — **566** `var(--…)` references — so the escape hatch is the exception, not the rule.
+2. **The light theme cannot fully apply.** Inline styles outrank any selector, and **155** colour literals are hardcoded inside them (most frequently `rgba(255,255,255,0.02)` and `rgba(255,255,255,0.05)`, 11 times each — white surface tints that create depth on a dark ground and vanish on a light one). `index.css` carries only **36** `[data-theme="light"]` override rules against 366 class selectors (34 before Milestone 7 added two for `#radar-recommendation-panel`, whose hardcoded `rgba(10,15,30,0.85) !important` put dark text on a dark panel in the light theme — fixed because M7 touched that panel, per the roadmap's rule that presentation work rides along with whichever milestone touches a screen). Inline styles do also use design tokens — **566** `var(--…)` references — so the escape hatch is the exception, not the rule.
 
 **Motion and focus**: **26** `@keyframes` with **0** `prefers-reduced-motion` handling; 9 `:focus` rules but no `:focus-visible`.
 

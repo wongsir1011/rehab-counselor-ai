@@ -319,8 +319,10 @@ export class RehabCounselorDB {
       exportedAt: new Date().toISOString(),
       data: {
         userName: localStorage.getItem("rehab_user_name") || "",
-        completedCount: parseInt(localStorage.getItem("rehab_completed_cases_count") || "0", 10) || 0,
-        completedIds: readJSON("rehab_completed_case_ids", []),
+        // Milestone 7 / D7：完成場次不再有 localStorage 副本。欄位名與格式維持不變
+        // （舊備份仍可還原），但值改由 sessions 推導 —— 備份檔內部因此永遠自洽。
+        completedCount: sessions.length,
+        completedIds: [...new Set(sessions.map(s => s && s.caseId).filter(Boolean))],
         achievements: readJSON("rehab_unlocked_achievements", []),
         theoryProgress: readJSON("rehab_theory_progress", {}),
         settings,
@@ -371,8 +373,8 @@ export class RehabCounselorDB {
     // 小型進度/設定仍留在 localStorage（見 ARCHITECTURE §5 資料分層）。
     // 注意：大宗資料絕不寫回 localStorage，否則配額問題會原封不動搬回來。
     if (data.userName !== undefined) localStorage.setItem("rehab_user_name", data.userName);
-    if (data.completedCount !== undefined) localStorage.setItem("rehab_completed_cases_count", data.completedCount);
-    if (data.completedIds !== undefined) localStorage.setItem("rehab_completed_case_ids", JSON.stringify(data.completedIds));
+    // Milestone 7 / D7：completedCount 與 completedIds 現為衍生值，還原時刻意忽略。
+    // 寫回去只會重建一份與 sessions 可能矛盾的副本 —— 那正是 D7 的成因。
     if (data.achievements !== undefined) localStorage.setItem("rehab_unlocked_achievements", JSON.stringify(data.achievements));
     if (data.theoryProgress !== undefined) localStorage.setItem("rehab_theory_progress", JSON.stringify(data.theoryProgress));
 
