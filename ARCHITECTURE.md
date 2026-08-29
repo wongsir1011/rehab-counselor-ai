@@ -1,7 +1,7 @@
 # Architecture: RehabCounselor AI
 
 > **Status**: Living Architecture Document (SSOT for Code Structure & Technical Design)  
-> **Last Reconciled**: 2026-08-29 HKT (UTC+8) — Milestone 7 built; see §7 for drift found and closed
+> **Last Reconciled**: 2026-08-30 HKT (UTC+8) — Milestone 8 built; see §7 for drift found and closed
 
 ---
 
@@ -111,6 +111,16 @@ initApp()  →  await hydrateVault()  →  switchView("dashboard")   // first re
 
 **Backup / restore** — Settings → 資料保險箱 exports the full vault (sessions, custom cases, achievements, theory progress, non-secret settings) as `RehabCounselor_Vault_YYYY-MM-DD.json`, and restores it as an overwrite (validate → `clearAll()` → write). The Danger Zone reset offers a backup export before its two destructive confirmations, and calls `clearAll()` so reset data does not resurrect on the next boot.
 
+**Bounded waits (Milestone 8)** — every promise in `db.js` now goes through `settleWithin()`, which guarantees settlement: a hard timeout (8s for `open()`, 5s for individual operations), plus the two handlers whose absence caused permanent hangs. `open()` gained `onblocked` — reproduced before the fix as a promise that never settled and never recovered, now rejecting in ~2ms with `VAULT_BLOCKED`. Every transaction gained `onabort`, which fires without `oncomplete`/`onerror` when a transaction is aborted — `clearAll()`, used by both the Danger Zone reset and backup restore, hung forever on that path.
+
+The connection now sets `onversionchange` (close and drop the cached handle so this tab never blocks another tab's upgrade) and `onclose` (drop the cache so a dead handle is not reused). **`DB_VERSION` is still 1, so no upgrade has ever been attempted; these two handlers are the precondition that makes any future schema change safe** rather than a permanent "加載中..." for every counselor with two tabs open.
+
+Timeouts, blocks and aborts are **re-thrown** rather than swallowed into the existing fallback return values (`false` / `[]` / `null`). "Not responding" must never be silently rendered as "no data", because an empty history reads to the counselor as lost records.
+
+**Degradation reasons (Milestone 8)** — `probe()` returns `{ available, reason, message }` and `state.vaultDegradedReason` carries it (`unavailable` | `blocked` | `timeout` | `error`). The distinction is not cosmetic: under `blocked`/`timeout` the sessions are still sitting in IndexedDB, so the banner says **「你的面談紀錄沒有遺失」**, while `unavailable` (private browsing) genuinely means new records cannot be stored durably. `hydrateVault()` always completes, so `switchView("dashboard")` always runs; the degraded banner and its retry button are rendered by `switchView()` on every view.
+
+Milestone 7's `reconcileAchievementsOnce()` is **skipped** whenever the reason is `blocked`/`timeout`/`error`, and its flag is not written. Reconciling against a vault that could not be read would revoke legitimately earned badges — a real data loss caused by a read failure.
+
 **Derived values (Milestone 7)** — every number the interface states about the counselor is computed in one place, `computeCounselorRecord(historySessions)` in `app.js`, which returns `{ totalSessions, evaluatedSessions, evaluatedCount, distinctCaseIds, userTurns, radar, radarAverage }`. The dashboard, the analytics page, the longitudinal trend chart and the achievement predicates all read it; none of them aggregates on its own.
 
 `radar` and `radarAverage` are **`null`, not `0`, when no session carries an AI evaluation**. This is deliberate and structural: D20 happened because "not evaluated" was written as `0`, then flowed silently into a coordinate formula and drew a pentagon collapsed at the centre — which reads as "this counselor scored zero". `null` breaks that formula instead of lying, so each consumer is forced to render an explicit "no record yet" state. `radarPolygonPoints(radar, maxRadius)` returns `null` for a `null` radar and the caller emits no `<polygon>`.
@@ -132,7 +142,7 @@ A full clause-by-clause audit of `PRD.md` against `origin/main` (`1d531a5`, byte
 | ~~D3~~ | ~~Canned supervisor hint on failure~~ | **RESOLVED (M5)**: `generateCoachHint()` deleted. Failures surface the real error and leave the panel in a neutral, non-clinical state. |
 | ~~D4~~ | ~~Hard-coded opening hint asserting "強烈的抗拒姿態" for every case~~ | **RESOLVED (M5)**: replaced with a neutral empty state making no clinical claim. Necessary because M5 makes the panel permanently visible. |
 | ~~D5~~ | ~~Offline demo returns a generic canned line when a case has no script or its script runs out, unmarked~~ | **RESOLVED (M6, 2026-08-28)**: the generic fallback is deleted. A scriptless case cannot be entered offline at all — `startRoleplaySession()` shows an explanatory panel instead — and an exhausted script says so, naming the turn count, rather than inventing dialogue. |
-| D6 | SOAP/ICF drafts live only in `state.activeSession.notes`; no `beforeunload` guard anywhere (**re-verified 2026-08-29: zero occurrences in `app.js` and `index.html`, which also blocks the SUCCESS clause**); the UI nevertheless displays a green **"已安全備份"** indicator | `app.js:3427`, `app.js:3596`, `app.js:3576-3578` | HARD CONSTRAINTS "SOAP drafts reside … in IndexedDB" |
+| ~~D6~~ | ~~SOAP/ICF drafts live only in `state.activeSession.notes`; no `beforeunload` guard anywhere; the UI nevertheless displays a green **"已安全備份"** indicator~~ | **RESOLVED (M8, 2026-08-30)**: `beforeunload` now guards any in-progress interview that has content, in-app navigation is guarded at the single `switchView()` choke point, and the green indicator is replaced by a standing amber line that says the draft lives only in this tab. Drafts are still **not** persisted — PRD OUT OF SCOPE forbids resuming an interrupted interview, so the fix is to tell the truth and intercept the exit, not to add the excluded capability. The **SUCCESS clause can now be walked end to end.** |
 
 ### Logged, non-blocking
 
@@ -154,7 +164,7 @@ PRD v3 tightened several clauses and added one wholly new obligation. Measured a
 | D13 | **Usage Guardrail** — a per-counselor daily cap on model calls, shown in settings with the remaining budget | **Not built at all.** No call counter, no cap, no settings surface. Scheduled by owner decision on 2026-08-27 into the milestone that is **Milestone 9** after the 2026-08-29 renumbering. |
 | ~~D14~~ | ~~Scripted demo turns must be visibly marked; scriptless cases must not be roleplayable without a key~~ | **RESOLVED (M6)**: every scripted bubble carries a "示範劇本" badge and an amber left border; `history[].scripted` persists into the vault so the session-detail popup and the Markdown export both mark demo turns for the supervisor; scriptless cases are blocked at entry. |
 | ~~D1′~~ | ~~Supervisor hint visible by default on arrival~~ | **RESOLVED (M5)**, verified in-browser: hint readable with no click on the first turn. |
-| D6′ | Interface **must never claim a draft is saved when it is not** (v1 implied only the storage location) | The "已安全備份" indicator still makes the false claim. **Milestone 8** must remove or truth-up the indicator, not only add the leave-guard. (Renumbered 2026-08-29 when M7「每個數字都來自你的紀錄」was inserted; the drift is unchanged.) |
+| ~~D6′~~ | ~~Interface **must never claim a draft is saved when it is not**~~ | **RESOLVED (M8, 2026-08-30)**: the indicator and its entire「同步中... → 已安全備份」state machine are deleted, along with the now-orphaned `@keyframes pulse-amber-dot`. The replacement makes no durability claim at all: 「草稿只存在於此分頁 · 面談結束後才寫入保險箱」. |
 
 ### Findings from the Milestone 5 peer review (2026-08-28 02:26 HKT)
 
@@ -191,7 +201,7 @@ These are one defect in three locations and must be fixed in a single pass; fixi
 
 Audited against `PRD.md` **v3** on disk — the v4 draft raised the same day was **not approved and not written**, so v3 remains the source of product truth. Code audited was `origin/main` = `9988551`, verified byte-for-byte against the five files served from the Vercel deployment.
 
-**The SUCCESS clause cannot currently be walked end to end.** It states that the counselor *"attempts to leave the page mid-interview and is stopped by a warning"*; `beforeunload` appears **zero** times in `app.js` and `index.html`. This reframes D6 — it is not only a durability gap, it blocks the PRD's own demo script.
+~~**The SUCCESS clause cannot currently be walked end to end.**~~ **RESOLVED (M8, 2026-08-30).** At the time of this audit it stated that the counselor *"attempts to leave the page mid-interview and is stopped by a warning"* while `beforeunload` appeared **zero** times — which reframed D6 as blocking the PRD's own demo script. M8 added the guard and verified it by dispatching real `beforeunload` events: intercepted with SOAP content, intercepted with ICF content only, **not** intercepted when the room is empty or the notes are whitespace only.
 
 | ID | Finding | Evidence |
 | :--- | :--- | :--- |
@@ -232,6 +242,18 @@ Four additional claims of the same family were found by reading the code during 
 **One bug was caught by the milestone's own test, not by reading the code**: the first version of `evaluateAchievement("theory_explorer")` returned `false` when the MI drill had not been run in the current session — so a legitimately earned badge was revoked on **every page reload**, because `miGameScore` resets to 0 on boot. The predicate now returns `null` (cannot verify) in that case and `false` only when the *persisted* theory progress proves non-compliance. Re-verified: badge retained across reloads when theory modules are complete, revoked when they are not.
 
 **The one-time reconciliation** (`reconcileAchievementsOnce()`, flagged in `app_meta`) revokes only badges whose criteria are verifiably unmet, shows a one-time explanation on the badge wall, and is idempotent — verified by seeding all six badges against a record that justifies four.
+
+### Findings from the Milestone 8 build (2026-08-30)
+
+**A correction to the roadmap's own claim.** `Product_Roadmap.md` said the boot hang could be triggered by simply opening two tabs. Measured: it cannot, today. `DB_VERSION` has always been 1, so no upgrade is requested and `onblocked` never fires — two tabs were opened and both booted normally. The defect was **loaded but unfired**: the first `DB_VERSION` bump would have hung every counselor with two tabs open, permanently, because the holding tab had no `onversionchange` to let go. The other two paths (transaction abort; IndexedDB not responding in a throttled tab) were live. The PRD's "or unresponsive" clause required the fix regardless of trigger.
+
+**The strongest evidence came from an accident.** Mid-verification the tool environment began throttling IndexedDB (`indexedDB.databases()` answered normally while `indexedDB.open()` timed out indefinitely). In exactly that state, a stale-cached **M7 build** was observed sitting at 「加載中... / 請稍候...」 with an empty content area and **not one line in the console** — the defect verbatim. The M8 build under the identical condition rendered the dashboard, showed 「本機儲存沒有回應 · 你的面談紀錄沒有遺失」 with a working retry button, and logged two deliberate, explanatory warnings.
+
+**One bug was caught by the milestone's own test.** The first version of the in-app guard asked for confirmation, and on "yes" navigated away — but left `state.activeSession` holding the abandoned draft. `hasUnsavedInterview()` therefore stayed true forever, so **every subsequent navigation and every tab close asked the same question again about an interview the counselor had already abandoned.** `discardActiveInterview()` now clears the in-memory copy once the counselor confirms (and on the 放棄返回 button), and only for sessions without `vaultedAt` — the report page and the exporter still need `activeSession` after finalization.
+
+**A structural fix, not a workaround.** The "正在評估" state used to *replace* `#content-view-mount`, which is why a failed evaluation could only `switchView("arena")` and throw the whole interview away: the room's DOM was gone and re-rendering it via `startRoleplaySession()` would rebuild `state.activeSession` and wipe the transcript. It is now a non-destructive overlay. Verified: forcing a failure leaves the counselor in the room with all three bubbles, the SOAP notes and the coach hint byte-identical, and a retry then completes normally.
+
+**Known, unhandled, and recorded**: the interview room is largely illegible in the light theme. M8's own new elements are readable in both themes (measured), but the room's pre-existing hardcoded panel backgrounds are not — this is the §8 issue, and rebuilding a whole view's light theme is outside the "presentation work rides along with the screen you touch" rule that M8 applied to its own components.
 
 ### Confirmed sound
 

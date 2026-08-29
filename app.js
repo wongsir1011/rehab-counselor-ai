@@ -2,7 +2,7 @@
 
 import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260829_v24_m7";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions, getScriptedFlow } from "./geminiService.js?v=20260828_v23_m6b";
-import { RehabCounselorDB } from "./src/utils/db.js?v=20260829_v24_m7";
+import { RehabCounselorDB } from "./src/utils/db.js?v=20260830_v25_m8";
 
 // Global App State
 const state = {
@@ -18,6 +18,12 @@ const state = {
   // 讓 6000+ 行既有渲染碼不必改成 async。
   historySessions: [],
   vaultMode: "indexeddb", // "indexeddb" | "localstorage-fallback"
+  // Milestone 8：目前模式的**成因**。null 代表正常。
+  // "unavailable" = 真的用不了（無痕模式等）；"blocked" = 其他分頁佔用；
+  // "timeout" = 沒有回應；"error" = 讀取出錯。
+  // 分開記錄的理由：後三者的紀錄其實還在保險箱裡，若與 "unavailable" 共用一句
+  // 「不可用」，同工會合理地以為資料沒了 —— 那是本平台最不該給的錯誤印象。
+  vaultDegradedReason: null,
   vaultReady: false,
   activeCase: null,
   activeSession: null, // { history: [], notes: { soap: "", icf: "" }, report: null }
@@ -299,7 +305,8 @@ function initLocaleAndSound() {
       
       AudioSynth.playClick();
       updateStaticUIStrings();
-      switchView(state.activeView);
+      // Milestone 8：這是**重繪**不是離開（同一個 view），不得被未完成面談守衛攔下。
+      switchView(state.activeView, { skipUnsavedGuard: true });
     });
   });
 
@@ -489,8 +496,9 @@ async function persistCompletedSession(session) {
 }
 
 /** localStorage 唯讀降級：IndexedDB 完全不可用時（如 Safari 無痕模式）沿用舊資料。 */
-function hydrateFromLocalStorageFallback() {
+function hydrateFromLocalStorageFallback(reason) {
   state.vaultMode = "localstorage-fallback";
+  state.vaultDegradedReason = reason || "unavailable";
   try {
     const s = JSON.parse(localStorage.getItem("rehab_sessions_history") || "[]");
     state.historySessions = Array.isArray(s) ? s : [];
@@ -512,10 +520,14 @@ function hydrateFromLocalStorageFallback() {
  * IndexedDB 不可用時大聲降級並在 UI 明示，絕不靜默顯示空白歷史令同工誤以為資料遺失。
  */
 async function hydrateVault() {
-  const available = await RehabCounselorDB.probe();
-  if (!available) {
-    console.warn("[Vault] IndexedDB 不可用（可能為無痕模式），降級至 localStorage 唯讀模式。");
-    hydrateFromLocalStorageFallback();
+  // Milestone 8：本函式的每一條路徑都必須結束。db.js 已把所有等待包上界限，
+  // 這裡負責把失敗翻譯成「同工看得懂的降級原因」並讓開機繼續。
+  // 開機一旦卡在這裡不返回，switchView("dashboard") 就永遠不會執行 ——
+  // 那正是 PRD「Degradation Honesty」禁止的「indefinite loading state」。
+  const probe = await RehabCounselorDB.probe();
+  if (!probe.available) {
+    console.warn(`[Vault] 無法開啟 IndexedDB（${probe.reason}）：${probe.message}`);
+    hydrateFromLocalStorageFallback(probe.reason);
     state.vaultReady = true;
     return;
   }
@@ -529,7 +541,7 @@ async function hydrateVault() {
     // 遷移失敗時 localStorage 原始資料仍完整保留（db.js 先驗證後刪除），
     // 因此直接降級唯讀，資料不會遺失。
     console.error("[Vault] localStorage → IndexedDB 遷移失敗，降級至 localStorage 唯讀模式：", e);
-    hydrateFromLocalStorageFallback();
+    hydrateFromLocalStorageFallback(vaultReasonFromError(e));
     state.vaultReady = true;
     return;
   }
@@ -542,11 +554,52 @@ async function hydrateVault() {
     state.historySessions = sessions;
     state.cases = [...customCases.filter(c => c && !BUILTIN_CASE_IDS.has(c.id)), ...MOCK_CASES];
     state.vaultMode = "indexeddb";
+    state.vaultDegradedReason = null;
   } catch (e) {
     console.error("[Vault] 讀取 IndexedDB 失敗，降級至 localStorage 唯讀模式：", e);
-    hydrateFromLocalStorageFallback();
+    hydrateFromLocalStorageFallback(vaultReasonFromError(e));
   }
   state.vaultReady = true;
+}
+
+/** 把 db.js 拋出的錯誤代碼翻成 state.vaultDegradedReason 的取值。 */
+function vaultReasonFromError(err) {
+  if (!err || !err.code) return "error";
+  if (err.code === "VAULT_BLOCKED") return "blocked";
+  if (err.code === "VAULT_TIMEOUT") return "timeout";
+  if (err.code === "VAULT_ABORTED") return "timeout";
+  return "error";
+}
+
+/**
+ * Milestone 8：降級狀態下要對同工說的話。
+ * 關鍵區別 —— blocked／timeout 時**紀錄沒有遺失**，只是暫時讀不到；
+ * unavailable 才是真的存不進去。說錯一句，同工就會以為自己的面談紀錄沒了。
+ */
+function vaultDegradedNotice() {
+  switch (state.vaultDegradedReason) {
+    case "blocked":
+      return {
+        title: "另一個分頁正佔用本機儲存",
+        body: "請關閉本平台的其他分頁，然後按「重試連線」。<strong>你的面談紀錄沒有遺失</strong>，只是目前讀不到。"
+      };
+    case "timeout":
+      return {
+        title: "本機儲存沒有回應",
+        body: "<strong>你的面談紀錄沒有遺失</strong>，只是暫時讀不到。你可以先繼續使用其他功能，或按「重試連線」。"
+      };
+    case "error":
+      return {
+        title: "讀取本機儲存時發生錯誤",
+        body: "<strong>你的面談紀錄應該仍在保險箱內</strong>，但這次讀取失敗。可以按「重試連線」，或到「系統設定 → 資料保險箱」匯出備份。"
+      };
+    case "unavailable":
+    default:
+      return {
+        title: "本機儲存不可用",
+        body: "可能是無痕瀏覽視窗。新紀錄只能暫存於小容量儲存（5MB 上限），而且無法執行備份還原。改用一般瀏覽視窗開啟即可恢復。"
+      };
+  }
 }
 
 /**
@@ -686,14 +739,113 @@ async function initApp() {
 
   // 3. ADR-0005：載入本地保險箱。必須在首次渲染之前完成，
   //    否則儀表板與分析頁會先讀到空的 state.historySessions。
+  //    Milestone 8：先把載入狀態畫出來，內容區不再是一片空白。
+  renderVaultLoadingState();
   await hydrateVault();
+  clearVaultLoadingState();
 
   // 3b. Milestone 7 §3.7：一次性徽章對帳。必須在保險箱載入之後、首次渲染之前，
   //     否則徽章牆會先畫出尚未對帳的狀態。失敗不阻擋開機。
-  await reconcileAchievementsOnce();
+  //
+  //     ⚠️ Milestone 8：保險箱「沒有回應」時**必須跳過對帳**。此時
+  //     state.historySessions 是空的（或只有 localStorage 的舊副本），
+  //     對帳會據此收回同工合法取得的徽章 —— 那是一次因讀取失敗造成的真實
+  //     資料損失。讀不到紀錄等同無從查證，正是 M7 定義的 null 情境。
+  //     旗標不寫入，下次正常開機再跑。
+  if (state.vaultDegradedReason === "blocked" || state.vaultDegradedReason === "timeout" || state.vaultDegradedReason === "error") {
+    console.warn("[Vault] 保險箱未能完整讀取，本次跳過徽章對帳以免誤收回。");
+  } else {
+    await reconcileAchievementsOnce();
+  }
+
+  // 3c. Milestone 8：未完成的面談不得無聲消失。
+  initUnsavedInterviewGuard();
 
   // 4. Load default view (Dashboard)
   switchView("dashboard");
+}
+
+/* ==========================================================================
+   Milestone 8: 開機載入狀態與保險箱降級橫幅
+   ========================================================================== */
+
+let vaultLoadingSlowTimer = null;
+
+/**
+ * 開機時立刻把載入狀態畫進內容區。
+ * 舊版此處是**完全空白**的 #content-view-mount 加頂欄兩行靜態字
+ * （「加載中... / 請稍候...」），沒有 spinner、沒有錯誤、沒有出路 ——
+ * 與 PRD「never sit on an indefinite loading state with no explanation
+ * and no way forward」逐字相反。
+ */
+function renderVaultLoadingState() {
+  const mount = document.getElementById("content-view-mount");
+  if (!mount) return;
+
+  mount.innerHTML = `
+    <div class="glass-card vault-loading-card" id="vault-loading-card">
+      <i class="fa-solid fa-spinner fa-spin vault-loading-spinner"></i>
+      <h3 class="vault-loading-title">正在開啟本機保險箱…</h3>
+      <p class="vault-loading-body">載入你的面談紀錄與自定義個案。</p>
+      <p class="vault-loading-slow" id="vault-loading-slow" hidden>
+        本機儲存回應較慢，仍在等待…（最多再等數秒，之後平台會照常開啟並說明狀況）
+      </p>
+    </div>
+  `;
+
+  // 2.5 秒仍未完成就先給進度說明，不讓同工對著一個不動的 spinner 猜。
+  if (vaultLoadingSlowTimer) clearTimeout(vaultLoadingSlowTimer);
+  vaultLoadingSlowTimer = setTimeout(() => {
+    const slow = document.getElementById("vault-loading-slow");
+    if (slow) slow.hidden = false;
+  }, 2500);
+}
+
+function clearVaultLoadingState() {
+  if (vaultLoadingSlowTimer) {
+    clearTimeout(vaultLoadingSlowTimer);
+    vaultLoadingSlowTimer = null;
+  }
+  const card = document.getElementById("vault-loading-card");
+  if (card) card.remove();
+}
+
+/**
+ * 降級狀態的常駐橫幅。由 switchView() 在每次渲染後插到內容區最上方，
+ * 讓同工在任何一頁都看得到狀況，而不是只在設定頁才知道。
+ */
+function renderVaultDegradedBanner() {
+  const mount = document.getElementById("content-view-mount");
+  if (!mount || state.vaultMode === "indexeddb") return;
+
+  const notice = vaultDegradedNotice();
+  const banner = document.createElement("div");
+  banner.className = "vault-degraded-banner";
+  banner.id = "vault-degraded-banner";
+  banner.innerHTML = `
+    <i class="fa-solid fa-triangle-exclamation vault-degraded-icon"></i>
+    <div class="vault-degraded-text">
+      <p class="vault-degraded-title">${notice.title}</p>
+      <p class="vault-degraded-body">${notice.body}</p>
+    </div>
+    <button type="button" class="btn vault-degraded-retry" id="vault-retry-btn">
+      <i class="fa-solid fa-rotate"></i> 重試連線
+    </button>
+  `;
+  mount.insertBefore(banner, mount.firstChild);
+
+  const retryBtn = document.getElementById("vault-retry-btn");
+  if (retryBtn) {
+    retryBtn.addEventListener("click", async () => {
+      AudioSynth.playClick();
+      retryBtn.disabled = true;
+      retryBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 重試中…`;
+      // 丟掉可能已死的連線快取，強制重新開啟。
+      RehabCounselorDB.db = null;
+      await hydrateVault();
+      switchView(state.activeView, { skipUnsavedGuard: true });
+    });
+  }
 }
 
 /* ==========================================================================
@@ -729,23 +881,96 @@ function initNavigation() {
     item.addEventListener("click", (e) => {
       e.preventDefault();
       const target = item.getAttribute("data-target");
-      
-      // Update UI active class
+
+      // Milestone 8：高亮**必須**等 switchView 回報成功才移動。
+      // 舊版先換 class 再切換，未完成面談的守衛一旦攔下，
+      // 高亮就會停在一個同工根本沒去成的頁面上。
+      if (switchView(target) === false) return;
+
       items.forEach(nav => nav.classList.remove("active"));
       item.classList.add("active");
-      
-      switchView(target);
     });
   });
 }
 
-function switchView(viewName) {
+/* ==========================================================================
+   Milestone 8: 未完成面談的保護
+   ========================================================================== */
+
+/**
+ * 這場面談是否**進行中且尚未入庫**（也就是離開就會永久失去）。
+ *
+ * 三個條件各自有其必要：
+ *  1. activeSession 存在 —— 但它**不會**自己歸零（只在危險區重設時才回 null），
+ *     所以單靠它會在做完一場面談後永遠為真，之後每次導覽都被誤攔。
+ *  2. 尚未入庫 —— 入庫成功後寫入 vaultedAt。不改成把 activeSession 設為 null，
+ *     因為報告頁與匯出仍要讀它，設 null 會弄壞既有流程。
+ *  3. 有東西可失去 —— 剛進房間、一句話沒講、一個字沒寫時攔截，
+ *     只會訓練同工無視警告。
+ *
+ * PRD OUT OF SCOPE 明訂「the counselor is warned but not rescued」：
+ * 本函式的職責是**警告**，不是把草稿存起來。
+ */
+function hasUnsavedInterview() {
+  const s = state.activeSession;
+  if (!s || s.vaultedAt) return false;
+  const hasTurns = Array.isArray(s.history) && s.history.length > 0;
+  const notes = s.notes || {};
+  const hasNotes = !!((notes.soap || "").trim() || (notes.icf || "").trim());
+  return hasTurns || hasNotes;
+}
+
+const UNSAVED_INTERVIEW_WARNING =
+  "本次面談尚未完成，離開會失去逐字對話與 SOAP／ICF 草稿，且無法復原。\n\n確定離開嗎？";
+
+/**
+ * 關閉分頁／重新整理／離開網站時的攔截。
+ * 瀏覽器一律顯示自己的標準措辭，不接受自訂文字，因此不嘗試傳字串。
+ * 述詞不成立時完全不介入，一般瀏覽不受任何影響。
+ */
+/**
+ * 放棄一場未入庫的面談。同工已經確認過，內容確實失去 ——
+ * 清掉記憶體副本，讓述詞回到 false，不再對一場已結束的面談重複發問。
+ * 只清未入庫的：已入庫者報告頁與匯出仍要讀 activeSession。
+ */
+function discardActiveInterview() {
+  if (state.activeSession && !state.activeSession.vaultedAt) {
+    state.activeSession = null;
+  }
+}
+
+function initUnsavedInterviewGuard() {
+  window.addEventListener("beforeunload", (e) => {
+    if (!hasUnsavedInterview()) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+}
+
+/**
+ * @param {string} viewName
+ * @param {{ skipUnsavedGuard?: boolean }} [opts]
+ * @returns {boolean} false = 被未完成面談的守衛攔下，畫面未變更
+ */
+function switchView(viewName, opts = {}) {
+  // Milestone 8：應用內離開的攔截。放在 switchView 內部這一個位置，
+  // 十一個呼叫點自動全部受保護；只有三處顯式豁免（語系重繪、放棄返回、
+  // 離線無劇本面板），理由見 plan/08 §3.3。
+  // viewName !== state.activeView：已在房間中又點同一項不算離開。
+  if (!opts.skipUnsavedGuard && viewName !== state.activeView && hasUnsavedInterview()) {
+    if (!confirm(UNSAVED_INTERVIEW_WARNING)) return false;
+    // 同工已確認放棄 —— 這場面談就此結束，內容確實失去。
+    // 必須在此清掉，否則 activeSession 會帶著已放棄的草稿留在記憶體裡，
+    // 讓之後**每一次**導覽與關分頁都再問一次同一個問題。
+    discardActiveInterview();
+  }
+
   state.activeView = viewName;
   const mount = document.getElementById("content-view-mount");
   const title = document.getElementById("view-title");
   const subtitle = document.getElementById("view-subtitle");
   
-  if (!mount || !title || !subtitle) return;
+  if (!mount || !title || !subtitle) return false;
   
   // Stop ongoing voice playback if switching views
   stopRecording();
@@ -792,6 +1017,13 @@ function switchView(viewName) {
       renderSettings(mount);
       break;
   }
+
+  // Milestone 8：降級狀態的常駐橫幅置於內容區最上方。
+  // 放在這裡（而非各個 render 函式內）確保任何一頁都看得到，
+  // 而不是只有走到設定頁的同工才知道保險箱出了什麼事。
+  renderVaultDegradedBanner();
+
+  return true;
 }
 
 /* ==========================================================================
@@ -3484,7 +3716,9 @@ function renderOfflineScriptUnavailable(selectedCase) {
   if (backToArena) {
     backToArena.addEventListener("click", () => {
       AudioSynth.playClick();
-      switchView("arena");
+      // Milestone 8：此路徑未建立 activeSession，述詞本就為 false；
+      // 顯式標註以免日後改動時誤加攔截。
+      switchView("arena", { skipUnsavedGuard: true });
     });
   }
 }
@@ -3630,10 +3864,17 @@ function startRoleplaySession(selectedCase) {
               <div class="notes-tab active" id="note-tab-soap" style="font-size:0.72rem; padding:4px 6px; flex:1; text-align:center; position:relative; z-index:2;">SOAP 輔導日誌</div>
               <div class="notes-tab" id="note-tab-icf" style="font-size:0.72rem; padding:4px 6px; flex:1; text-align:center; position:relative; z-index:2;">ICF 臨床評估表</div>
             </div>
-            <!-- Auto-save Indicator -->
-            <div class="notes-save-indicator" id="rp-notes-save-indicator" style="display:flex; align-items:center; gap:5px; font-size:0.7rem; color:var(--accent-green); transition:color 0.3s ease;">
-              <span class="save-status-dot" style="width:6px; height:6px; background:var(--accent-green); border-radius:50%; box-shadow:0 0 6px var(--accent-green); display:inline-block; transition:background 0.3s ease, box-shadow 0.3s ease;"></span>
-              <span class="save-status-text">已安全備份</span>
+            <!-- Milestone 8：草稿的真實狀態。
+                 舊版此處是恆亮綠點寫「已安全備份」，並在輸入時播放
+                 「同步中... → 已安全備份」的動畫 —— 而草稿只在
+                 state.activeSession.notes，從未寫入任何持久層。
+                 PRD 明文禁止：「the interface must never claim a draft is
+                 saved or backed up when it is not」。
+                 刻意**不**改為自動存草稿：PRD OUT OF SCOPE 排除「續接未完成的
+                 面談」，本里程碑的職責是把話講真並攔下離開，不是加上該能力。 -->
+            <div class="notes-draft-status" id="rp-notes-draft-status" title="面談結束並生成報告後，日誌才會連同逐字紀錄一併寫入本機保險箱。">
+              <span class="notes-draft-dot"></span>
+              <span class="notes-draft-text">草稿只存在於此分頁 · 面談結束後才寫入保險箱</span>
             </div>
           </div>
           <textarea class="notes-textarea" id="rp-notes-box" placeholder="SOAP 記錄格式：&#10;S (主觀感受)：案主主要申訴與情緒&#10;O (客觀觀察)：面談時的言語與身體反應&#10;A (臨床評估)：使用哪些MI/ACT工具，效果如何&#10;P (未來計劃)：承諾行動細節"></textarea>
@@ -3776,37 +4017,15 @@ function startRoleplaySession(selectedCase) {
     if (highlighter) highlighter.style.transform = "translateX(100%)";
   });
 
-  // Keep notes synchronizing on input with debounced AI save indicator feedback
-  let saveDebounceTimer = null;
-  const saveIndicator = document.getElementById("rp-notes-save-indicator");
-  const saveDot = saveIndicator ? saveIndicator.querySelector(".save-status-dot") : null;
-  const saveText = saveIndicator ? saveIndicator.querySelector(".save-status-text") : null;
-
+  // Milestone 8：輸入仍然同步進 state.activeSession.notes（那是真的），
+  // 但不再播放任何暗示「已儲存」的動畫或字樣 —— 整個假的儲存狀態機已刪除。
+  // 狀態列是一句恆常為真的陳述，不隨輸入變化，因此這裡不需要任何 UI 更新。
   notesBox.addEventListener("input", () => {
     if (noteSoap.classList.contains("active")) {
       state.activeSession.notes.soap = notesBox.value;
     } else {
       state.activeSession.notes.icf = notesBox.value;
     }
-
-    if (saveIndicator && saveDot && saveText) {
-      saveIndicator.style.color = "var(--accent-amber)";
-      saveDot.style.background = "var(--accent-amber)";
-      saveDot.style.boxShadow = "0 0 8px var(--accent-amber)";
-      saveDot.style.animation = "pulse-amber-dot 1s infinite alternate";
-      saveText.textContent = "同步中...";
-    }
-
-    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
-    saveDebounceTimer = setTimeout(() => {
-      if (saveIndicator && saveDot && saveText) {
-        saveIndicator.style.color = "var(--accent-green)";
-        saveDot.style.background = "var(--accent-green)";
-        saveDot.style.boxShadow = "0 0 6px var(--accent-green)";
-        saveDot.style.animation = "none";
-        saveText.textContent = "已安全備份";
-      }
-    }, 600);
   });
 
   // Send Actions (Text Mode)
@@ -3884,8 +4103,11 @@ function startRoleplaySession(selectedCase) {
   // End Session Action
   document.getElementById("rp-end-session-btn").addEventListener("click", () => endRoleplaySession());
   document.getElementById("rp-abort-btn").addEventListener("click", () => {
-    if (confirm("確定放棄本次模擬對話嗎？這將不會保存你的輔導記錄。")) {
-      switchView("arena");
+    if (confirm("確定放棄本次模擬對話嗎？逐字對話與 SOAP／ICF 草稿將不會保存，且無法復原。")) {
+      // Milestone 8：已在此確認過，不得再被守衛問第二次；
+      // 同時清掉記憶體副本，否則之後每次導覽都會再問一次同一場已放棄的面談。
+      discardActiveInterview();
+      switchView("arena", { skipUnsavedGuard: true });
     }
   });
 }
@@ -4552,6 +4774,42 @@ function speakWebSpeech(cleanText, bubbleEl = null, forcePlay = false) {
 /* ==========================================================================
    Session Report & Evaluation
    ========================================================================== */
+/**
+ * Milestone 8：「正在評估」的**非破壞性**覆蓋層。
+ * 疊在面談房間之上而不取代它，失敗時移除即可完整退回。
+ */
+function showEvaluatingOverlay(mount) {
+  hideEvaluatingOverlay();
+  if (!mount) return;
+  // 覆蓋層以 absolute 定位在 mount 之內，故 mount 需為定位參考點。
+  if (getComputedStyle(mount).position === "static") {
+    mount.style.position = "relative";
+  }
+  const overlay = document.createElement("div");
+  overlay.id = "rp-evaluating-overlay";
+  overlay.className = "evaluating-overlay";
+  overlay.innerHTML = `
+    <div class="evaluating-overlay-card">
+      <i class="fa-solid fa-spinner fa-spin evaluating-overlay-spinner"></i>
+      <h3 class="evaluating-overlay-title">正在評估你的輔導技巧…</h3>
+      <p class="evaluating-overlay-body">
+        AI 臨床督導正在分析你的會話歷史紀錄，評估同理心反映、OARS 技巧、ACT 價值澄清引導，
+        並為你生成一份能力評估雷達圖，這大概需要 5-8 秒…
+      </p>
+      <p class="evaluating-overlay-note">
+        <i class="fa-solid fa-shield-halved"></i>
+        面談內容仍在畫面上。即使評估失敗，逐字紀錄與日誌都不會遺失。
+      </p>
+    </div>
+  `;
+  mount.appendChild(overlay);
+}
+
+function hideEvaluatingOverlay() {
+  const overlay = document.getElementById("rp-evaluating-overlay");
+  if (overlay) overlay.remove();
+}
+
 async function endRoleplaySession() {
   if (state.activeSession.history.length === 0) {
     alert("尚未開始對話，無法結束會話。");
@@ -4565,13 +4823,13 @@ async function endRoleplaySession() {
   stopRecording();
 
   const mount = document.getElementById("content-view-mount");
-  mount.innerHTML = `
-    <div class="glass-card" style="text-align:center; padding:48px 24px;">
-      <i class="fa-solid fa-spinner fa-spin" style="font-size:3rem; color:var(--accent-purple); margin-bottom:16px;"></i>
-      <h3 style="font-size:1.4rem; font-weight:800; color:var(--text-bright); margin-bottom:8px;">正在評估你的輔導技巧...</h3>
-      <p style="color:var(--text-muted); max-width:520px; margin:0 auto;">AI 臨床督導正在分析你的會話歷史紀錄，評估同理心反映、OARS 技巧、ACT 價值澄清引導，並為你生成一份能力評估雷達圖，這大概需要 5-8 秒...</p>
-    </div>
-  `;
+
+  // ⚠️ Milestone 8：這裡**不可以**覆寫 mount。舊版以 mount.innerHTML 換掉整個
+  //    面談房間，於是評估一旦失敗就無路可退 —— 房間 DOM 沒了，而重新呼叫
+  //    startRoleplaySession() 會重建 state.activeSession，把整場面談抹掉。
+  //    當時的程式因此只能 switchView("arena")，等於由程式自己丟棄同工的面談。
+  //    改為疊一層覆蓋層：失敗時移除覆蓋層，房間與逐字紀錄原封不動。
+  showEvaluatingOverlay(mount);
 
   // 離線示範模式沒有 AI，因此沒有臨床評估 —— 但逐字紀錄與 SOAP／ICF 日誌是同工
   // 的真實工作產物，不能因為缺少評分就整場丟棄。故此處只在「有金鑰卻失敗」時中止。
@@ -4580,9 +4838,11 @@ async function endRoleplaySession() {
     report = await generateSessionReport(state.apiKey, state.selectedModel, state.activeCase, state.activeSession.history);
   } catch (error) {
     if (error.code !== "OFFLINE_NO_EVALUATION") {
+      hideEvaluatingOverlay();
       AudioSynth.playError();
-      alert(`評估報告生成失敗：${error.message}`);
-      switchView("arena");
+      // 留在房間裡。同工可以再按一次「結束會話」重試，或按「放棄返回」
+      // （該鈕會確認）。逐字對話、SOAP、ICF、干預佇列全部保持原狀。
+      alert(`評估報告生成失敗：${error.message}\n\n本次面談仍保留在畫面上，未有任何內容遺失。你可以再試一次「結束會話」，或先匯出逐字紀錄。`);
       return;
     }
     // 離線：report 維持 null，往下照常保存面談本身。
@@ -4610,6 +4870,12 @@ async function endRoleplaySession() {
     // ADR-0005：寫入 IndexedDB 保險箱並同步更新記憶體副本。
     await persistCompletedSession(completedSession);
 
+    // Milestone 8：入庫**成功之後**才標記。這是 hasUnsavedInterview() 的關鍵條件 ——
+    // 在此之前離開就是真的失去，之後離開則已有持久副本。
+    // 只存在於記憶體，不進入 completedSession，因此不寫入任何 object store。
+    state.activeSession.vaultedAt = new Date().toISOString();
+    hideEvaluatingOverlay();
+
     // Play physical success sound
     AudioSynth.playSuccess();
     
@@ -4623,8 +4889,10 @@ async function endRoleplaySession() {
     
     renderSessionReport(mount, report);
   } catch (error) {
+    hideEvaluatingOverlay();
     AudioSynth.playError();
     alert(`評估報告生成失敗：${error.message}`);
+    // Milestone 8：不豁免守衛 —— 若面談尚未入庫，離開前必須先問過同工。
     switchView("arena");
   }
 }
@@ -6453,7 +6721,8 @@ function renderSettings(container) {
               <p style="font-size:0.72rem; color:var(--text-muted); line-height:1.4;">
                 儲存引擎：${state.vaultMode === "indexeddb"
                   ? '<span style="color:var(--accent-green); font-weight:700;">IndexedDB 大容量保險箱</span>（數百 MB，不受 5MB 配額限制）'
-                  : '<span style="color:var(--accent-red); font-weight:700;">⚠️ localStorage 唯讀降級模式</span>（IndexedDB 不可用，可能為無痕瀏覽視窗；新紀錄仍受 5MB 配額限制，且無法執行還原）'}
+                  : `<span style="color:var(--accent-red); font-weight:700;">⚠️ localStorage 唯讀降級模式</span>（${vaultDegradedNotice().title}；新紀錄仍受 5MB 配額限制，且無法執行還原）`}
+                ${state.vaultMode === "indexeddb" ? "" : `<br><span style="color:var(--accent-amber);">${vaultDegradedNotice().body}</span>`}
               </p>
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">

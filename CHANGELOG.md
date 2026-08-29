@@ -4,6 +4,84 @@
 
 ---
 
+## [v20260830_v25_m8] - 2026-08-30 (香港時間 UTC+8)
+
+## 🛡️ Milestone 8「不會憑空消失的面談」
+
+兩件事，同一個原則：**不要在同工不知情的狀況下弄丟他的東西。**
+
+計劃：[`plan/08-interview-never-vanishes.md`](plan/08-interview-never-vanishes.md)（已批准 2026-08-30）
+對應 PRD v4：`USER JOURNEY 4`、`SUCCESS`、`Data Ownership & Durability`、`Degradation Honesty`
+
+### 🚪 未完成的面談不再靜默消失
+*   **關分頁／重新整理**：新增 `beforeunload` 攔截（此前全專案出現 **0 次**，這同時使 PRD SUCCESS 條款走不完）。
+*   **應用內離開**：守衛置於 `switchView()` 內部單一位置，十一個呼叫點自動受保護。側欄高亮改為**等 `switchView()` 回報成功才移動** —— 舊版先換 class 再切換，取消離開後高亮會停在一個同工根本沒去成的頁面。
+*   **三處顯式豁免**：語系切換（那是重繪不是離開）、「放棄返回」（已有自己的確認）、離線無劇本面板（該路徑未建立 session）。
+*   **判斷條件**：`hasUnsavedInterview()` —— 有 session、未入庫（`vaultedAt`）、且**有東西可失去**。零內容時攔截只會訓練同工無視警告。
+
+### 🩹 評估失敗不再由程式丟掉整場面談
+舊版有金鑰卻評估失敗時，`alert()` 後直接 `switchView("arena")`，**逐字對話與筆記連同面談一起消失**。根因是「正在評估你的輔導技巧...」直接 `mount.innerHTML = ...` 覆寫面談房間 —— 失敗後無路可退，而重建房間會重置 `state.activeSession`、抹掉整場面談。
+
+改為**非破壞性覆蓋層**。失敗時移除覆蓋層、留在房間、內容原封不動。實測：三個氣泡、SOAP 筆記、督導提示逐字不變，再按一次「結束會話」即可正常完成報告。
+
+### 🟠 移除不實的「已安全備份」
+綠點與整套「同步中... → 已安全備份」動畫刪除（連同已無使用者的 `@keyframes pulse-amber-dot`），改為恆常為真的一行：**「草稿只存在於此分頁 · 面談結束後才寫入保險箱」**。
+
+刻意**不**加自動存草稿：PRD OUT OF SCOPE 排除「續接未完成的面談」（「the counselor is warned but not rescued」）。職責是把話講真並攔下離開，不是補上被排除的能力。
+
+### ⏱️ 程式一定打得開
+`db.js` 的每一個 Promise 此前都**沒有逾時、沒有 `onblocked`、沒有 `onabort`、沒有 `onversionchange`**。實測重現兩條永久掛死路徑：
+
+1.  **`open()` 遇 blocked**：持有舊版連線再開新版 → `onblocked` 觸發，`onsuccess`／`onerror` 5 秒內完全不 settle 且永不恢復。修正後 **2ms 內以 `VAULT_BLOCKED` 返回**。
+2.  **交易被中止**：`onabort` 觸發而 `oncomplete`／`onerror` 都不觸發 —— 危險區重設與備份還原走的 `clearAll()` 會永遠掛住。
+
+新增 `settleWithin()` 統一包裝（`open()` 8 秒、單筆操作 5 秒），並補上 `onblocked`、`onabort`、`onversionchange`（本分頁主動讓路，**這是將來任何一次改 schema 不會弄壞使用者的前提**）、`onclose`（清掉死連線快取）。
+
+逾時／阻擋／中止一律**往上拋**而非吞成 `[]`／`false`／`null` ——「沒有回應」被靜默當成「沒有資料」，同工會看到空白歷史而以為紀錄遺失。
+
+### 🗣️ 降級說人話，而且永遠有出路
+*   開機**立即**渲染載入狀態（此前內容區是完全空白），2.5 秒追加「回應較慢」說明，8 秒落入具名降級。
+*   `state.vaultDegradedReason` 分四種（`unavailable`／`blocked`／`timeout`／`error`）。**這個區分不是措辭潤飾**：後三者的紀錄其實還在 IndexedDB 裡，橫幅因此明說**「你的面談紀錄沒有遺失」**；只有 `unavailable`（無痕模式）才是真的存不進去。
+*   降級橫幅由 `switchView()` 在每一頁渲染，附「重試連線」鈕。設定頁的引擎狀態同步顯示具體原因，取代此前在 blocked／timeout 情境下**錯誤**的單一句「可能為無痕瀏覽視窗」。
+*   **M7 徽章對帳在 `blocked`／`timeout`／`error` 時跳過**，旗標不寫入。對著讀不到的保險箱做對帳，會收回同工合法取得的徽章 —— 那是一次因讀取失敗造成的真實資料損失。
+
+### 🐛 建置期間抓到的 bug（由本里程碑自己的測試發現）
+第一版守衛在同工確認離開後**沒有清掉 `state.activeSession`**，於是 `hasUnsavedInterview()` 永遠為真 —— **之後每一次導覽、每一次關分頁都會對一場他早已放棄的面談再問一次**。新增 `discardActiveInterview()`，只清未入庫者（報告頁與匯出仍需讀已入庫的 `activeSession`）。
+
+### 📐 路線圖原文的更正
+路線圖稱「開兩個分頁就可能觸發」卡死。**實測今日重現不到** —— `DB_VERSION` 始終為 1，不需升級就不會 blocked，兩個分頁都正常開機。該缺陷是**已上膛但未擊發**：任何一次 schema 變更都會讓所有雙分頁同工永久卡死。另兩條路徑今日即可觸發。PRD 的「unresponsive」條款不論觸發方式都要求修復，故照修，並據實記錄精確狀態。
+
+### ✅ 驗證
+*   `check_syntax.py` 全綠。
+*   **`beforeunload`（以真實事件 dispatch 驗證）**：有 SOAP 內容 → 攔截；只有 ICF 內容 → 攔截；房間空白 → 不攔截；筆記只有空白字元 → 不攔截；入庫後 → 不攔截；放棄後 → 不攔截。
+*   **應用內離開**：取消 → 仍在房間、筆記完整、**高亮沒有跑掉**；確認 → 離開且高亮正確移動、且**不再重複發問**。
+*   **語系切換**：面談中切換 EN／繁中，**零次**確認，房間與筆記完好。
+*   **評估失敗**：延遲失敗下覆蓋層確實顯示且房間在其後完好；失敗後留在房間、資料逐字不變；再試一次成功產出報告頁。
+*   **`db.js`**：以真實原始碼僅改 `DB_VERSION` 常數模擬未來升級 → `VAULT_BLOCKED`，2ms。
+*   **開機必定結束（真實逾時下驗證）**：工具環境開始節流 IndexedDB 時，快取中的舊 M7 版本停在「加載中...」、內容區空白、**主控台一行都沒有**；同一狀態下 M8 版本正常渲染儀表板、顯示具名橫幅與重試鈕、主控台兩條刻意的說明性警告。
+*   **載入時間線**：0ms 出現 spinner ／ 2.85s 出現「回應較慢」／ 8.9s 完成並移除。
+*   **重試連線**：失敗分支 8.2 秒回到可操作狀態，全程畫面可用，不進入無限等待。
+*   **M7 對帳跳過**：降級下植入三個徽章（其中兩個依紀錄不該有）→ 重載後三個原封不動、旗標未寫入。
+*   **回歸**：M5 單次結構化往返與缺欄位拋錯；M6 離線劇本標示；M7 儀表板數字與無字母等第。
+*   **主題**：M8 新增元件於深淺主題皆可讀（已量測 computed style）。
+
+### ⚠️ 未驗證
+`clearAll()` 的 `onabort` 分支（程式碼已加，因工具環境 IndexedDB 被節流無法實跑）；「重試連線」的**成功**分支；真實 Gemini 金鑰端對端；MiniMax TTS 與連續 STT。
+
+### 🚧 已知未處理
+面談室在淺色主題下大面積不可讀 —— `ARCHITECTURE.md` §8 記錄的既有問題（面談室大量寫死深色背景）。M8 只觸及筆記區一個小元件，重建整個 view 的淺色主題不在「順帶處理當期觸及畫面」的範圍內。
+
+### 📦 變更檔案
+*   [src/utils/db.js](src/utils/db.js)：`VAULT_ERROR`、`settleWithin()`、`vaultError()`；`open()` 補 `onblocked`／逾時／`onversionchange`／`onclose`；七個方法全部有界並補 `onabort`；`probe()` 改回傳 `{ available, reason, message }`。
+*   [app.js](app.js)：`hasUnsavedInterview()`／`discardActiveInterview()`／`initUnsavedInterviewGuard()`／`showEvaluatingOverlay()`／`hideEvaluatingOverlay()`／`renderVaultLoadingState()`／`renderVaultDegradedBanner()`／`vaultDegradedNotice()`／`vaultReasonFromError()`；`switchView()` 加守衛與布林回傳；`initNavigation()` 依回傳值移動高亮；`endRoleplaySession()` 改用覆蓋層並寫入 `vaultedAt`；筆記假儲存狀態機刪除。
+*   [index.css](index.css)：草稿狀態列、載入卡、降級橫幅、評估覆蓋層（含淺色覆寫）；刪除 `@keyframes pulse-amber-dot`。
+*   [index.html](index.html)：快取戳記 `v20260830_v25_m8`。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)、[Product_Roadmap.md](Product_Roadmap.md)、[plan/08-interview-never-vanishes.md](plan/08-interview-never-vanishes.md)。
+
+**未更動**：`PRD.md`（本里程碑實作既有條款）、`CLAUDE.md`、`mockData.js`、`geminiService.js`、`DECISIONS.md`、`adr/`。
+
+---
+
 ## [v20260829_v24_m7] - 2026-08-29 (香港時間 UTC+8)
 
 ## 🎯 Milestone 7「每個數字都來自你的紀錄」
