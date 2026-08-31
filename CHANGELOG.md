@@ -4,6 +4,53 @@
 
 ---
 
+## [review-m8] - 2026-08-31 13:28 (香港時間 UTC+8)
+
+## 🔍 Milestone 8 同儕審查 —— 三項待修，狀態退回「待修」
+
+**本次不含任何程式碼變更**（`git status` 全程乾淨）。這是一次審查與留檔，結論是 Milestone 8 **不能維持「已完成」**。
+
+時間來源：本機系統時鐘，原始值 `Mon Aug 31 05:28:18 UTC 2026`（`date -u`），系統時區 `Asia/Hong_Kong`，換算為 **2026-08-31 13:28 HKT**。本專案為 local-first 無後端，故無伺服器時間可用。
+
+### 🧪 為何這次能看到上輪看不到的東西
+Milestone 8 自身的驗證**全程在降級模式下進行** —— 當時工具環境正在節流 IndexedDB，正常模式的路徑一次都沒測過。本次 IndexedDB 已恢復（裸 `open` 4ms），先在正常模式重跑 M5／M6／M7 的完整流程確認無回歸，再逐項檢查 M8 —— 三項問題全部出現在正常模式才走得到的路徑上。
+
+### 🚨 必須修正（依序，一次一項）
+
+*   **D32 —— `if (err && err.code) throw err` 誤判，會弄丟整場面談（本輪引入的回歸）**
+    本意是只重拋自訂的 `VAULT_ERROR`，但**所有 `DOMException` 都帶 truthy 的數字 `.code`**（`AbortError` 20、`QuotaExceededError` 22、`NotFoundError` 8），於是所有原生儲存錯誤都被重拋。實測完整鏈路：AI 評估**成功**、寫入保險箱失敗 → alert 顯示「評估報告生成失敗」（錯誤訊息，評估其實成功）→ 守衛詢問一個同工從未發起的離開 → 答「是」則三個氣泡與 SOAP 筆記全失，連已消耗金鑰額度產生的評分一併丟棄。**Milestone 8 之前**：`saveSession()` 回 `false`，alert 警告後**照常顯示完整報告**，同工可以匯出。這違反 ADR-0007 自己的規則 4。
+*   **D33 —— 首次渲染拋例外仍是空白畫面（既有缺陷，但擊穿本里程碑承諾）**
+    `initApp().catch()` 只 `console.error`。以還原一份 `theoryProgress` 為 `{}` 的備份自然觸發（`buildBackupJSON()` 在該鍵缺失時就寫 `{}`）：儀表板空白、無錯誤、無按鈕；分析頁更糟 —— `innerHTML` 從未被賦值，**保留上一頁內容**（標題「學習分析與歷程」配設定頁畫面）。經兩版逐字比對確認**非本輪引入**，但 M8 建了 `renderVaultLoadingState()` 這個能把訊息畫進內容區的能力，卻沒接到 catch 上。
+*   **D34 —— `VersionError` 時降級措辭給出錯誤診斷（M8 未完成的部分）**
+    `probe()` 只分類 `VAULT_BLOCKED`／`VAULT_TIMEOUT`，其餘一律落入 `unavailable` —— 最具體也最可能錯的措辭。資料庫 v2、程式 v1 時（任何一次 `DB_VERSION` 升級加上快取舊版 `app.js` 就會發生，本次審查中親眼看到）顯示「可能是無痕瀏覽視窗…改用一般瀏覽視窗開啟即可恢復」：診斷錯誤、建議無效，且**沒有說「你的紀錄沒有遺失」**，而畫面同時顯示「互動 0 輪」。
+
+### ✅ 本次補驗的項目（上一條列為未驗證者）
+*   `clearAll()` 的 `onabort` 分支：不再掛住（1ms 返回），但回原生 `DOMException` 而非 `VAULT_ABORTED` → 記為 **D35**，並更正上一條的措辭。
+*   **「重試連線」的成功分支**：以「第一次 `open` 永不 settle」的測試頁製造降級 → 按重試 → **404ms 恢復**，且寫入一筆再讀回，確認保險箱真的可用而非只是橫幅消失。
+*   **`onversionchange` 的實際效果**：全部分頁跑新版時 v2 升級順利完成（主控台「本分頁主動關閉連線讓路」）；對照有分頁跑舊版時，同一升級令**所有 `open` 靜默排隊**，連 `onblocked` 都不觸發。這反過來證明 8 秒硬逾時比 `onblocked` 更根本。
+
+### ✅ 未回歸（正常 IndexedDB 模式下實跑）
+空保險箱儀表板 `—／尚未評估`；完整面談 → 評估 → 寫入 IndexedDB → 報告頁；徽章門檻正確；分析頁無字母等第、練習聲明在；備份無金鑰且還原往返一致；M6 離線標示完好；M5 單次往返與缺欄位拋錯正常。
+
+### 📋 不阻塞（D35–D39）
+`onabort` 在有進行中請求時永不獲勝；`showEvaluatingOverlay()` 留下的 `position: relative` 未還原；降級橫幅無去重且 `switchView` 對 `roleplay`／`icf_board` 不重繪 → 降級模式切語系會累積橫幅；`.notes-save-indicator` 兩條 CSS 成死碼；降級橫幅不出現在面談室與報告頁（已判定可接受）。
+
+### 📐 決策留檔
+本輪為 Milestone 8 補寫兩份此前未留檔的 ADR：
+*   [ADR-0007](adr/0007-bounded-vault-waits-and-connection-yielding.md)：保險箱的每個等待都有界，連線主動讓路。記錄五個被否決方案，含「只加 `onblocked` 不加逾時」（實測證明不夠）與「鏡像到 localStorage」（會建立第二個權威歸屬）。
+*   [ADR-0008](adr/0008-warn-but-never-rescue-in-progress-interviews.md)：未完成的面談只警告、不救援。記錄七個被否決方案，含「自動存草稿」（PRD OUT OF SCOPE 明文排除，且會讓未 finalize 的面談進入保險箱）。
+
+### 📦 變更檔案（僅文檔）
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§6 更正錯誤傳播的描述為**實際行為**（原文只說重拋逾時／阻擋／中止，實際更廣）；§7 新增 D32–D39 與審查條件說明。
+*   [Product_Roadmap.md](Product_Roadmap.md)：Milestone 8 由「Completed ✅」改為「已交付，同儕審查後待修 ⚠️」；註明三項待修**排在 Milestone 9 之前**，理由與 Milestone 6 處理 D15 時一致。
+*   [DECISIONS.md](DECISIONS.md)、[adr/0007](adr/0007-bounded-vault-waits-and-connection-yielding.md)、[adr/0008](adr/0008-warn-but-never-rescue-in-progress-interviews.md)：新增兩份 ADR 與索引。
+*   [plan/08-interview-never-vanishes.md](plan/08-interview-never-vanishes.md)：新增 §10 審查結果、補驗項目、接縫結論與仍未測試清單。
+*   本檔：新增本條目，並更正上一條「補上 `onabort`」的過度宣稱。
+
+**未更動**：`PRD.md`（偏差記於本檔與 `ARCHITECTURE.md` §7，PRD 仍是產品意圖 SSOT，不因實作而修改）、`CLAUDE.md`、所有程式碼檔案。
+
+---
+
 ## [v20260830_v25_m8] - 2026-08-30 (香港時間 UTC+8)
 
 ## 🛡️ Milestone 8「不會憑空消失的面談」
@@ -36,6 +83,8 @@
 2.  **交易被中止**：`onabort` 觸發而 `oncomplete`／`onerror` 都不觸發 —— 危險區重設與備份還原走的 `clearAll()` 會永遠掛住。
 
 新增 `settleWithin()` 統一包裝（`open()` 8 秒、單筆操作 5 秒），並補上 `onblocked`、`onabort`、`onversionchange`（本分頁主動讓路，**這是將來任何一次改 schema 不會弄壞使用者的前提**）、`onclose`（清掉死連線快取）。
+
+> **2026-08-31 更正**：上句「補上 `onabort`」措辭過度。同儕審查實測發現，交易中有進行中請求時，請求的 error 會先冒泡到 `tx.onerror`，`settleWithin` 的 `settled` 旗標隨即擋掉之後才觸發的 `onabort` —— 因此 `VAULT_ERROR.ABORTED` 在最常見的情形下是死碼。中止**確實不再掛住**（實測 1ms 返回），但走的是 `onerror` 而非 `onabort`。詳見 `ARCHITECTURE.md` §7 **D35**。
 
 逾時／阻擋／中止一律**往上拋**而非吞成 `[]`／`false`／`null` ——「沒有回應」被靜默當成「沒有資料」，同工會看到空白歷史而以為紀錄遺失。
 

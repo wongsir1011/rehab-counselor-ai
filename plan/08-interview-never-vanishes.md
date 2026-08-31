@@ -1,6 +1,6 @@
 # Milestone 8 Plan: 不會憑空消失的面談
 
-* **Status**: Completed ✅ —— 建置與驗證完成 2026-08-30
+* **Status**: 已建置，同儕審查後待修 ⚠️ —— 建置 2026-08-30，審查 2026-08-31 13:28 HKT
 * **Approved**: 2026-08-30 HKT (UTC+8)
 * **Roadmap Ref**: [Product Roadmap Milestone 8](../Product_Roadmap.md)
 * **Traces to PRD v4**: `USER JOURNEY 4`（drafts safe from accidental loss）；`SUCCESS`（「attempts to leave the page mid-interview and is stopped by a warning」）；`HARD CONSTRAINTS → Data Ownership & Durability`（「the interface must never claim a draft is saved or backed up when it is not」）；`HARD CONSTRAINTS → Degradation Honesty`
@@ -334,3 +334,42 @@ if (!opts.skipUnsavedGuard && hasUnsavedInterview() && viewName !== state.active
 
 ### 已知未處理
 面談室在淺色主題下大面積不可讀。量測確認：CSS 權杖確實有切換（`--text-muted` → `rgb(100,116,139)`），問題在面板容器寫死的深色背景 —— `ARCHITECTURE.md` §8 記錄的既有議題。M8 新增的元件本身兩種主題皆可讀。M8 只觸及筆記區一個小元件，重建整個 view 的淺色主題不在「設計系統工作隨觸及畫面順帶處理」的範圍內。
+
+
+---
+
+## 10. 同儕審查結果（2026-08-31 13:28 HKT）
+
+**審查條件與上輪不同，這是本次發現的來源。** Milestone 8 自身的驗證全程在**降級模式**下進行（當時工具環境節流 IndexedDB），正常模式的路徑一次都沒測過。本次 IndexedDB 已恢復（裸 `open` 4ms），因此先在正常模式重跑 M5／M6／M7 的完整流程，再逐項檢查 M8。
+
+### 10.1 未回歸（正常 IndexedDB 模式下實跑）
+
+空保險箱儀表板顯示 `— / 尚未評估 (N/A)`；完整面談 → AI 評估 → **寫入 IndexedDB**（非 localStorage）→ 報告頁；empathy 92 正確觸發同理心大師徽章；分析頁「AI 即時回饋（練習參考）…平均為 70 分」且無字母等第；備份匯出無任何 API 金鑰、`completedCount` 由 sessions 推導；備份還原往返一致；M6 離線示範徽章與劇本標示完好；M5 單次結構化往返與缺欄位拋錯正常。
+
+### 10.2 本次補驗的項目（§9 列為未驗證者）
+
+| 上輪未驗證 | 本次結果 |
+| :--- | :--- |
+| `clearAll()` 的 `onabort` 分支 | ✅ 不再掛住（1ms 返回）。但回的是原生 `DOMException`（code 20）而非 `VAULT_ABORTED` —— 見 D35 |
+| 「重試連線」的**成功**分支 | ✅ 以「第一次 open 永不 settle」的測試頁製造降級 → 按重試 → **404ms 恢復**，且實測保險箱恢復後真的可讀可寫（寫入一筆再讀回），非只是橫幅消失 |
+| `onversionchange` 的實際效果 | ✅ 直接觀察到：全部分頁跑新版時 v2 升級順利完成（主控台「本分頁主動關閉連線讓路」）；對照有分頁跑舊版時，同一升級造成**所有 open 靜默排隊**，連 `onblocked` 都不觸發 —— 只有逾時能救。這反過來證明 8 秒硬逾時比 `onblocked` 更根本 |
+
+### 10.3 必須修正（依序）
+
+| ID | 問題 | 判定 |
+| :--- | :--- | :--- |
+| **D32** | `if (err && err.code) throw err` 誤判：所有 `DOMException` 都有 truthy 數字 `.code`（AbortError 20／QuotaExceeded 22／NotFound 8），因此所有原生儲存錯誤都被重拋。實測完整鏈路：AI 評估**成功**但寫入失敗 → alert 說「評估報告生成失敗」（錯的）→ 守衛問一個同工沒發起的離開 → 答是則三個氣泡與 SOAP 全失，連已付費產生的評分一併丟掉。M8 之前會 alert 警告後**照常顯示完整報告**供匯出 | **本輪引入的回歸**，違反本里程碑核心承諾 |
+| **D33** | `initApp().catch()` 只 console.error。以還原一份 `theoryProgress` 為 `{}` 的備份自然觸發 → 儀表板空白、無說明、無出路；分析頁更糟：`innerHTML` 未被賦值，**保留上一頁內容**（標題「學習分析」配設定頁畫面）。經兩版逐字比對確認**非本輪引入**，但 M8 建了 `renderVaultLoadingState()` 這個能把訊息畫進 mount 的能力卻沒接到 catch 上 | 既有缺陷，擊穿本里程碑承諾 |
+| **D34** | `probe()` 只分類 `VAULT_BLOCKED`／`VAULT_TIMEOUT`，其餘一律 `unavailable` —— 最具體也最可能錯的措辭。`VersionError` 時顯示「可能是無痕瀏覽視窗…改用一般瀏覽視窗即可恢復」（診斷錯誤、建議無效），且**未說「你的紀錄沒有遺失」**，而畫面同時顯示「互動 0 輪」 | M8 未完成的部分 |
+
+### 10.4 不阻塞（D35–D39，詳見 `ARCHITECTURE.md` §7）
+
+`onabort` 在有進行中請求時永遠不會贏（`VAULT_ERROR.ABORTED` 在常見情形是死碼，CHANGELOG 措辭過度）；`showEvaluatingOverlay()` 留下的 `position: relative` 未還原；降級橫幅無去重且 `switchView` 對 `roleplay`／`icf_board` 不重繪 → 降級模式下切語系會累積橫幅；`.notes-save-indicator` 兩條 CSS 成為死碼；降級橫幅不出現在面談室與報告頁（已判定可接受）。
+
+### 10.5 接縫檢查結果
+
+`switchView()` 新增的布林回傳：11 個呼叫點中僅 `initNavigation` 消費，其餘 10 處忽略（原本即回 `undefined`），無破壞。ICF 沙盒（`activeView='icf_board'`，不建 session）進出皆不受守衛干擾。`vaultedAt` 在有評估與離線無評估兩條路徑都正確設定，且**未進入備份檔**（實測 `hasVaultedAt: false`），確認未觸及任何 object store。M7 的徽章對帳在降級時正確跳過。
+
+### 10.6 本次仍未測試
+
+真實 Gemini 金鑰端對端；MiniMax TTS 與連續 STT；ICF 沙盒的拖放評分與「全人評估官」徽章；理論 Hub 閃卡與 ACT／ICF 自測；小組研討 Studio；AI 個案合成；SOAP 助手抽屜；Phase 13 督導干預注入；`localstorage-fallback` 下完成面談的完整流程；D37 的橫幅累積（讀碼＋部分實測推論，未在降級模式實跑）。

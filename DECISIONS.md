@@ -8,3 +8,5 @@
 - **2026-08-15**: [ADR-0004: Continuous Cantonese STT with Pause Recovery Buffer](adr/0004-continuous-stt-acoustic-models.md)
 - **2026-08-15**: [ADR-0005: IndexedDB Local Vault for Large-Capacity Training Session Persistence](adr/0005-indexeddb-local-vault-persistence.md) — *implemented 2026-08-27*
 - **2026-08-27**: [ADR-0006: Four-Pillar SSOT Documentation Governance](adr/0006-four-pillar-ssot-documentation.md)
+- **2026-08-30**: [ADR-0007: Bounded Vault Waits and Connection Yielding](adr/0007-bounded-vault-waits-and-connection-yielding.md)
+- **2026-08-30**: [ADR-0008: Warn, But Never Rescue, an In-Progress Interview](adr/0008-warn-but-never-rescue-in-progress-interviews.md)
