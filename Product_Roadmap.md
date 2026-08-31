@@ -88,20 +88,41 @@ After completing a counseling session, counselors receive a 5-dimension clinical
 
 ---
 
-### Milestone 8: 不會憑空消失的面談
+### Milestone 8: 不會憑空消失的面談 [已交付，同儕審查後待修 ⚠️]
 **帶來的價值**：  
 面談進行到一半時誤關分頁或重新整理，目前逐字對話與 SOAP／ICF 草稿會全部消失且無法救回。此里程碑讓系統在同工要離開未完成的面談時出聲攔截，並移除筆記區那個「已安全備份」的綠點 —— 在草稿其實只存在於記憶體時，那句話是不實的。
 
 同時解決一個更根本的問題：**程式有時會永遠停在「加載中... 請稍候...」而完全打不開。** 同工只要開了兩個分頁就可能觸發，畫面沒有錯誤訊息、沒有逾時、沒有出路。這一步讓本機儲存無法使用或反應過慢時，平台明白說出狀況並讓同工繼續使用，而不是無聲卡死。
 
 **為何排在這裡**：前面的里程碑讓面談本身更值得投入；投入愈多，中途失去的損失愈大。而「打不開」是所有價值的前提。  
-*Traces to PRD: USER JOURNEY Step 4（drafts safe from accidental loss）; HARD CONSTRAINTS (Data Ownership & Durability —— 「the interface must never claim a draft is saved or backed up when it is not」; Degradation Honesty)*
+*Traces to PRD: USER JOURNEY Step 4（drafts safe from accidental loss）; SUCCESS（「stopped by a warning」）; HARD CONSTRAINTS (Data Ownership & Durability —— 「the interface must never claim a draft is saved or backed up when it is not」; Degradation Honesty)*  
+*Plan*: [`plan/08-interview-never-vanishes.md`](plan/08-interview-never-vanishes.md) — 已批准 2026-08-30
+
+**已交付**：關分頁與重新整理由 `beforeunload` 攔截；應用內離開由 `switchView()` 單一位置守衛（側欄高亮改為等回報成功才移動）；筆記區的綠色「已安全備份」連同整套假的同步動畫刪除，改為恆真的「草稿只存在於此分頁 · 面談結束後才寫入保險箱」。`db.js` 每一個等待都有界，補上 `onblocked`、`onabort`、`onversionchange`、`onclose`。開機一定結束：立即顯示載入狀態，2.5 秒說明回應較慢，8 秒落入具名降級並附「重試連線」。**PRD SUCCESS 條款至此可完整走通。**
+
+**建置期間的重要修正**：評估報告生成失敗時，舊版是**程式自己把整場面談丟掉**（alert 後 `switchView("arena")`）。根因是「正在評估」畫面直接覆寫面談房間的 DOM，失敗後無路可退。改為非破壞性覆蓋層 —— 實測失敗後逐字對話、SOAP、督導提示逐字不變，再按一次「結束會話」即可正常完成。
+
+**路線圖原文的更正**：「開兩個分頁就可能觸發」實測**今日重現不到** —— `DB_VERSION` 始終為 1，不需升級就不會 blocked。該缺陷是已上膛但未擊發：任何一次 schema 變更都會讓所有雙分頁同工永久卡死。另兩條路徑（交易中止、分頁被節流時 IndexedDB 不回應）今日即可觸發，且驗證期間真的發生了一次 —— 舊版在該狀態下空白卡死且主控台無任何輸出，新版正常開啟並說明狀況。
+
+**未驗證**：`clearAll()` 的 `onabort` 分支（程式碼已加，因工具環境 IndexedDB 被節流無法實跑）；「重試連線」的**成功**分支（失敗分支已驗證不會無限等待）；真實 Gemini 金鑰端對端。
+
+**未處理**：面談室在淺色主題下大面積不可讀 —— 屬 `ARCHITECTURE.md` §8 記錄的既有問題（面談室大量寫死深色背景）。M8 新增的元件本身兩種主題皆可讀（已量測）。
+
+**同儕審查結果（2026-08-31 13:28 HKT）**：本里程碑承諾的三件事（攔截離開、草稿說真話、開機一定結束）在正常模式下實測全部成立，M5／M6／M7 無回歸。但審查在**正常 IndexedDB 模式**下（M8 自身驗證全程處於降級模式，從未測過正常模式）發現三項必須修正的問題，因此狀態暫不標記為完成：
+
+| ID | 問題 | 性質 |
+| :--- | :--- | :--- |
+| **D32** | `if (err && err.code) throw err` 誤判 —— 所有 `DOMException` 都有 truthy 的 `.code`，導致寫入保險箱失敗時**整場面談連同已產生的 AI 評分一起丟失**。M8 之前會顯示完整報告讓同工匯出 | **本輪引入的回歸** |
+| **D33** | 首次渲染拋例外時仍是空白畫面、無說明、無出路（`initApp().catch()` 未接任何 UI）。以還原一份 `theoryProgress` 為 `{}` 的備份自然觸發 | 既有缺陷，但擊穿本里程碑承諾 |
+| **D34** | `VersionError` 時降級措辭給出錯誤診斷（「可能是無痕瀏覽視窗」），且**未說明紀錄沒有遺失** | M8 未完成的部分 |
+
+另有五項不阻塞事項（D35–D39）記於 `ARCHITECTURE.md` §7。修正順序：D32 → D33 → D34，一次一項。
 
 > **範圍調整（2026-08-29）**：開機可靠性原屬 Milestone 9（保險箱範疇），移至此處。理由：「程式打不開」的嚴重度高於一切，且與本里程碑同屬「不要失去使用者的東西」。經擁有者批准。
 
 ---
 
-### Milestone 9: 可信賴的本地紀錄
+### Milestone 9: 可信賴的本地紀錄 [排在 M8 待修項之後 ⏳]
 **帶來的價值**：  
 儀表板顯示的完成場次，與保險箱裡實際存著的面談永遠一致，還原備份之後也不會出現互相矛盾的數字。設定頁的診斷日誌不再永久留下金鑰特徵與帳號識別 —— 把螢幕轉給督導看時，設定頁不會殘留這些痕跡。同時，設定頁會顯示同工今日還剩多少次 AI 呼叫額度，讓自費金鑰的用量心裡有數，不會在面談中途才發現額度用完。
 
@@ -118,6 +139,7 @@ After completing a counseling session, counselors receive a 5-dimension clinical
 - **語言不一致是刻意的。** Milestone 1–4 的既有英文內容一字未改（屬已確認事項），新里程碑以白話中文撰寫。
 - **Milestone 2 與 3 的狀態於 2026-08-27 對照程式碼更正**，此前長期停留在「Next」／「Planned」。原先此處的過時警告已由本次更正取代。
 - **2026-08-29 重新排序**：新增 Milestone 7「每個數字都來自你的紀錄」，原 Milestone 7／8 順延為 8／9。
+- **2026-08-31 順序說明**：Milestone 8 的三項待修（D32／D33／D34）**排在 Milestone 9 之前**。理由：D32 是本輪引入的資料遺失回歸，直接抵觸北極星；在它未修正前推進新里程碑，等於在一條會弄丟面談的路徑上疊加流量 —— 與 Milestone 6 處理 D15 時採用的判斷一致。
 
 ---
 

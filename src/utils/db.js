@@ -29,52 +29,140 @@ const EXPORTABLE_SETTINGS = [
   "rehab_minimax_female_timbre"
 ];
 
+// Milestone 8：保險箱錯誤代碼。呼叫端據此分辨「不能用」與「沒有回應」——
+// 兩者對同工的意義完全相反：前者資料真的存不進去，後者資料好端端在裡面只是讀不到。
+export const VAULT_ERROR = {
+  BLOCKED: "VAULT_BLOCKED",     // 其他分頁佔用連線，升級被擋
+  TIMEOUT: "VAULT_TIMEOUT",     // 逾時未回應（背景分頁被凍結、資料庫損毀等）
+  ABORTED: "VAULT_ABORTED"      // 交易被中止
+};
+
+// 開啟連線的硬逾時。設 8 秒是為了同時滿足「不無限等待」與「不誤傷慢速機器」；
+// blocked 有專屬事件會立刻回報，不必等滿這段時間。
+const OPEN_TIMEOUT_MS = 8000;
+// 單筆讀寫的逾時。連線已建立後的操作遠快於開啟，故給較短的界限。
+const OP_TIMEOUT_MS = 5000;
+
+/** 帶 code 的保險箱錯誤，供呼叫端分流措辭。 */
+function vaultError(code, message) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
+/**
+ * Milestone 8：把一個 IndexedDB executor 包成**一定會 settle** 的 Promise。
+ *
+ * 原本 db.js 的每一個 Promise 都只掛 onsuccess/onerror（或 oncomplete/onerror），
+ * 沒有逾時、沒有 onblocked、沒有 onabort。實測證實兩條路徑會永遠掛住：
+ *   1. 持有舊版連線時開新版 → onblocked 觸發，另外兩者永遠不觸發。
+ *   2. 交易被 abort 且無進行中請求 → onabort 觸發，另外兩者永遠不觸發。
+ * 掛住的 Promise 會讓 await hydrateVault() 永不返回，首次 switchView() 永不執行，
+ * 畫面就停在「加載中...」—— PRD「Degradation Honesty」明文禁止的狀態。
+ *
+ * 逾時後遲到的結果一律丟棄（settled 旗標），避免兩份互相矛盾的資料同時生效。
+ */
+function settleWithin(executor, ms, timeoutMessage) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(vaultError(VAULT_ERROR.TIMEOUT, timeoutMessage));
+    }, ms);
+
+    const done = (fn) => (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+
+    try {
+      executor(done(resolve), done(reject));
+    } catch (err) {
+      done(reject)(err);
+    }
+  });
+}
+
 export class RehabCounselorDB {
   static db = null;
 
   static async open() {
     if (this.db) return this.db;
 
-    return new Promise((resolve, reject) => {
+    const db = await settleWithin((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
 
       request.onupgradeneeded = (e) => {
-        const db = e.target.result;
+        const upgradeDb = e.target.result;
 
-        if (!db.objectStoreNames.contains("sessions")) {
-          db.createObjectStore("sessions", { keyPath: "id" });
+        if (!upgradeDb.objectStoreNames.contains("sessions")) {
+          upgradeDb.createObjectStore("sessions", { keyPath: "id" });
         }
-        if (!db.objectStoreNames.contains("custom_cases")) {
-          db.createObjectStore("custom_cases", { keyPath: "id" });
+        if (!upgradeDb.objectStoreNames.contains("custom_cases")) {
+          upgradeDb.createObjectStore("custom_cases", { keyPath: "id" });
         }
-        if (!db.objectStoreNames.contains("app_meta")) {
-          db.createObjectStore("app_meta", { keyPath: "key" });
+        if (!upgradeDb.objectStoreNames.contains("app_meta")) {
+          upgradeDb.createObjectStore("app_meta", { keyPath: "key" });
         }
       };
 
-      request.onsuccess = (e) => {
-        this.db = e.target.result;
-        resolve(this.db);
+      // ⚠️ 本行是 Milestone 8 的核心修復之一。缺了它，另一個分頁持有舊版連線時
+      //    這個 Promise 永遠不會 settle（實測 5 秒無反應且不會自行恢復）。
+      request.onblocked = () => {
+        reject(vaultError(
+          VAULT_ERROR.BLOCKED,
+          "另一個分頁正開啟本平台並佔用本機儲存，保險箱無法升級。"
+        ));
       };
+
+      request.onsuccess = (e) => resolve(e.target.result);
 
       request.onerror = (e) => {
         console.error("IndexedDB Open Error:", e.target.error);
         reject(e.target.error);
       };
-    });
+    }, OPEN_TIMEOUT_MS, "本機儲存在 8 秒內沒有回應。");
+
+    // ⚠️ 同樣是核心修復：本分頁收到版本變更請求時主動讓路並關閉連線。
+    //    缺了它，本分頁會永久阻擋其他分頁升級 —— 也就是 onblocked 永遠不解除。
+    //    今日 DB_VERSION 固定為 1 不會觸發，但這一行是將來任何一次改 schema
+    //    不會弄壞使用者的前提條件。
+    db.onversionchange = () => {
+      console.warn("[Vault] 其他分頁要求升級保險箱，本分頁主動關閉連線讓路。");
+      db.close();
+      if (this.db === db) this.db = null;
+    };
+
+    // 連線被瀏覽器強制關閉（資料庫刪除、儲存被回收）時清掉快取，
+    // 下次呼叫重新開啟，而不是抱著一個已死的 handle 一直失敗。
+    db.onclose = () => {
+      console.warn("[Vault] 保險箱連線已關閉，下次存取將重新開啟。");
+      if (this.db === db) this.db = null;
+    };
+
+    this.db = db;
+    return this.db;
   }
 
   static async saveSession(session) {
     try {
       const db = await this.open();
-      return new Promise((resolve, reject) => {
+      return await settleWithin((resolve, reject) => {
         const tx = db.transaction("sessions", "readwrite");
         const store = tx.objectStore("sessions");
         const req = store.put(session);
         req.onsuccess = () => resolve(true);
         req.onerror = (e) => reject(e.target.error);
-      });
+        tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "寫入面談紀錄的交易被中止。"));
+      }, OP_TIMEOUT_MS, "寫入面談紀錄逾時。");
     } catch (err) {
+      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
+      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
+      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
+      if (err && err.code) throw err;
       console.warn("IndexedDB Save Session fallback:", err);
       return false;
     }
@@ -83,7 +171,7 @@ export class RehabCounselorDB {
   static async getAllSessions() {
     try {
       const db = await this.open();
-      return new Promise((resolve, reject) => {
+      return await settleWithin((resolve, reject) => {
         const tx = db.transaction("sessions", "readonly");
         const store = tx.objectStore("sessions");
         const req = store.getAll();
@@ -93,8 +181,13 @@ export class RehabCounselorDB {
           resolve(sessions);
         };
         req.onerror = (e) => reject(e.target.error);
-      });
+        tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "讀取面談紀錄的交易被中止。"));
+      }, OP_TIMEOUT_MS, "讀取面談紀錄逾時。");
     } catch (err) {
+      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
+      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
+      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
+      if (err && err.code) throw err;
       console.warn("IndexedDB Get Sessions fallback:", err);
       return [];
     }
@@ -103,14 +196,19 @@ export class RehabCounselorDB {
   static async saveCustomCase(customCase) {
     try {
       const db = await this.open();
-      return new Promise((resolve, reject) => {
+      return await settleWithin((resolve, reject) => {
         const tx = db.transaction("custom_cases", "readwrite");
         const store = tx.objectStore("custom_cases");
         const req = store.put(customCase);
         req.onsuccess = () => resolve(true);
         req.onerror = (e) => reject(e.target.error);
-      });
+        tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "寫入自定義個案的交易被中止。"));
+      }, OP_TIMEOUT_MS, "寫入自定義個案逾時。");
     } catch (err) {
+      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
+      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
+      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
+      if (err && err.code) throw err;
       console.warn("IndexedDB Save Custom Case fallback:", err);
       return false;
     }
@@ -119,14 +217,19 @@ export class RehabCounselorDB {
   static async getAllCustomCases() {
     try {
       const db = await this.open();
-      return new Promise((resolve, reject) => {
+      return await settleWithin((resolve, reject) => {
         const tx = db.transaction("custom_cases", "readonly");
         const store = tx.objectStore("custom_cases");
         const req = store.getAll();
         req.onsuccess = () => resolve(req.result || []);
         req.onerror = (e) => reject(e.target.error);
-      });
+        tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "讀取自定義個案的交易被中止。"));
+      }, OP_TIMEOUT_MS, "讀取自定義個案逾時。");
     } catch (err) {
+      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
+      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
+      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
+      if (err && err.code) throw err;
       console.warn("IndexedDB Get Custom Cases fallback:", err);
       return [];
     }
@@ -135,15 +238,22 @@ export class RehabCounselorDB {
   static async clearAll() {
     try {
       const db = await this.open();
-      return new Promise((resolve, reject) => {
+      return await settleWithin((resolve, reject) => {
         const tx = db.transaction(["sessions", "custom_cases", "app_meta"], "readwrite");
         tx.objectStore("sessions").clear();
         tx.objectStore("custom_cases").clear();
         tx.objectStore("app_meta").clear();
         tx.oncomplete = () => resolve(true);
         tx.onerror = (e) => reject(e.target.error);
-      });
+        // ⚠️ 實測證實這一行是必要的：交易被中止時 onabort 觸發，
+        //    oncomplete 與 onerror 都不會 —— 危險區重設與備份還原會永遠掛住。
+        tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "清空保險箱的交易被中止。"));
+      }, OP_TIMEOUT_MS, "清空保險箱逾時。");
     } catch (err) {
+      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
+      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
+      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
+      if (err && err.code) throw err;
       console.warn("IndexedDB Clear All failed:", err);
       return false;
     }
@@ -155,13 +265,18 @@ export class RehabCounselorDB {
   static async setMeta(key, value) {
     try {
       const db = await this.open();
-      return new Promise((resolve, reject) => {
+      return await settleWithin((resolve, reject) => {
         const tx = db.transaction("app_meta", "readwrite");
         const req = tx.objectStore("app_meta").put({ key, value });
         req.onsuccess = () => resolve(true);
         req.onerror = (e) => reject(e.target.error);
-      });
+        tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "寫入中繼資料的交易被中止。"));
+      }, OP_TIMEOUT_MS, "寫入中繼資料逾時。");
     } catch (err) {
+      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
+      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
+      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
+      if (err && err.code) throw err;
       console.warn("IndexedDB setMeta failed:", err);
       return false;
     }
@@ -170,13 +285,18 @@ export class RehabCounselorDB {
   static async getMeta(key) {
     try {
       const db = await this.open();
-      return new Promise((resolve, reject) => {
+      return await settleWithin((resolve, reject) => {
         const tx = db.transaction("app_meta", "readonly");
         const req = tx.objectStore("app_meta").get(key);
         req.onsuccess = () => resolve(req.result ? req.result.value : null);
         req.onerror = (e) => reject(e.target.error);
-      });
+        tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "讀取中繼資料的交易被中止。"));
+      }, OP_TIMEOUT_MS, "讀取中繼資料逾時。");
     } catch (err) {
+      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
+      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
+      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
+      if (err && err.code) throw err;
       console.warn("IndexedDB getMeta failed:", err);
       return null;
     }
@@ -186,9 +306,17 @@ export class RehabCounselorDB {
   static async probe() {
     try {
       await this.open();
-      return true;
+      return { available: true, reason: null, message: null };
     } catch (err) {
-      return false;
+      // Milestone 8：回報**為什麼**打不開，不只是「打不開」。
+      // blocked／timeout 代表紀錄很可能還好端端在 IndexedDB 裡，只是現在讀不到；
+      // 其餘（無痕模式等）才是真的不能用。兩者對同工的意義完全相反，
+      // 措辭不能共用一句「IndexedDB 不可用，可能為無痕瀏覽視窗」。
+      const reason =
+        err && err.code === VAULT_ERROR.BLOCKED ? "blocked" :
+        err && err.code === VAULT_ERROR.TIMEOUT ? "timeout" :
+        "unavailable";
+      return { available: false, reason, message: (err && err.message) || String(err) };
     }
   }
 
