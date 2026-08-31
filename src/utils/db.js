@@ -43,11 +43,50 @@ const OPEN_TIMEOUT_MS = 8000;
 // 單筆讀寫的逾時。連線已建立後的操作遠快於開啟，故給較短的界限。
 const OP_TIMEOUT_MS = 5000;
 
+const VAULT_ERROR_CODES = new Set(Object.values(VAULT_ERROR));
+
 /** 帶 code 的保險箱錯誤，供呼叫端分流措辭。 */
 function vaultError(code, message) {
   const err = new Error(message);
   err.code = code;
   return err;
+}
+
+/**
+ * 這個錯誤是不是**本模組發出的訊號**（逾時／阻擋／中止）？
+ *
+ * ⚠️ 不可用 `if (err.code)` 判斷。同儕審查實測：所有 `DOMException` 都帶
+ * truthy 的**數字** `.code`（AbortError 20、QuotaExceededError 22、
+ * NotFoundError 8、SecurityError 18、InvalidStateError 11），因此真值判斷
+ * 會把原生儲存錯誤一併當成本模組訊號往上拋 —— 那條路徑會讓一場已完成、
+ * 已評估的面談連同分數整個丟掉（ARCHITECTURE §7 D32）。
+ *
+ * VAULT_ERROR 的值全是字串、DOMException 的 code 全是數字，故型別已足以
+ * 區分；再加白名單，避免日後有人給原生錯誤補上字串 code。
+ */
+export function isVaultSignal(err) {
+  return !!(err && typeof err.code === "string" && VAULT_ERROR_CODES.has(err.code));
+}
+
+/**
+ * 把任一失敗歸類成同工看得懂的降級原因。
+ *
+ * 這是**唯一**的分類點。此前 probe() 與 app.js 的 vaultReasonFromError()
+ * 各有一套，兩份遲早分岔 —— 而分岔的後果是對同工說錯「你的資料還在不在」。
+ *
+ * 分類原則：只有在確定「儲存真的不能用」時才說無痕視窗；其餘一律說明
+ * 紀錄仍在、只是此刻讀不到。
+ */
+export function classifyVaultError(err) {
+  if (!err) return "error";
+  if (err.code === VAULT_ERROR.BLOCKED) return "blocked";
+  if (err.code === VAULT_ERROR.TIMEOUT) return "timeout";
+  if (err.code === VAULT_ERROR.ABORTED) return "timeout";
+  // 資料庫格式比程式新 —— 幾乎必然是快取到舊版程式，紀錄完好無損。
+  if (err.name === "VersionError") return "version";
+  // 這兩個才是「真的不能用」：無痕視窗、儲存被政策封鎖。
+  if (err.name === "SecurityError" || err.name === "InvalidStateError") return "unavailable";
+  return "error";
 }
 
 /**
@@ -159,10 +198,11 @@ export class RehabCounselorDB {
         tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "寫入面談紀錄的交易被中止。"));
       }, OP_TIMEOUT_MS, "寫入面談紀錄逾時。");
     } catch (err) {
-      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
-      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
-      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
-      if (err && err.code) throw err;
+      // 「沒有回應」絕不可被靜默當成「沒有資料」—— 那會讓同工看到空白歷史
+      // 而以為紀錄遺失。逾時／阻擋／中止一律往上拋，由呼叫端決定措辭；
+      // 其餘錯誤（配額滿、找不到、中止等原生 DOMException）維持既有的寬容
+      // fallback，讓呼叫端以回傳值判斷成敗而不是被例外中斷流程。
+      if (isVaultSignal(err)) throw err;
       console.warn("IndexedDB Save Session fallback:", err);
       return false;
     }
@@ -184,10 +224,11 @@ export class RehabCounselorDB {
         tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "讀取面談紀錄的交易被中止。"));
       }, OP_TIMEOUT_MS, "讀取面談紀錄逾時。");
     } catch (err) {
-      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
-      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
-      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
-      if (err && err.code) throw err;
+      // 「沒有回應」絕不可被靜默當成「沒有資料」—— 那會讓同工看到空白歷史
+      // 而以為紀錄遺失。逾時／阻擋／中止一律往上拋，由呼叫端決定措辭；
+      // 其餘錯誤（配額滿、找不到、中止等原生 DOMException）維持既有的寬容
+      // fallback，讓呼叫端以回傳值判斷成敗而不是被例外中斷流程。
+      if (isVaultSignal(err)) throw err;
       console.warn("IndexedDB Get Sessions fallback:", err);
       return [];
     }
@@ -205,10 +246,11 @@ export class RehabCounselorDB {
         tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "寫入自定義個案的交易被中止。"));
       }, OP_TIMEOUT_MS, "寫入自定義個案逾時。");
     } catch (err) {
-      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
-      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
-      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
-      if (err && err.code) throw err;
+      // 「沒有回應」絕不可被靜默當成「沒有資料」—— 那會讓同工看到空白歷史
+      // 而以為紀錄遺失。逾時／阻擋／中止一律往上拋，由呼叫端決定措辭；
+      // 其餘錯誤（配額滿、找不到、中止等原生 DOMException）維持既有的寬容
+      // fallback，讓呼叫端以回傳值判斷成敗而不是被例外中斷流程。
+      if (isVaultSignal(err)) throw err;
       console.warn("IndexedDB Save Custom Case fallback:", err);
       return false;
     }
@@ -226,10 +268,11 @@ export class RehabCounselorDB {
         tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "讀取自定義個案的交易被中止。"));
       }, OP_TIMEOUT_MS, "讀取自定義個案逾時。");
     } catch (err) {
-      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
-      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
-      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
-      if (err && err.code) throw err;
+      // 「沒有回應」絕不可被靜默當成「沒有資料」—— 那會讓同工看到空白歷史
+      // 而以為紀錄遺失。逾時／阻擋／中止一律往上拋，由呼叫端決定措辭；
+      // 其餘錯誤（配額滿、找不到、中止等原生 DOMException）維持既有的寬容
+      // fallback，讓呼叫端以回傳值判斷成敗而不是被例外中斷流程。
+      if (isVaultSignal(err)) throw err;
       console.warn("IndexedDB Get Custom Cases fallback:", err);
       return [];
     }
@@ -250,10 +293,11 @@ export class RehabCounselorDB {
         tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "清空保險箱的交易被中止。"));
       }, OP_TIMEOUT_MS, "清空保險箱逾時。");
     } catch (err) {
-      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
-      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
-      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
-      if (err && err.code) throw err;
+      // 「沒有回應」絕不可被靜默當成「沒有資料」—— 那會讓同工看到空白歷史
+      // 而以為紀錄遺失。逾時／阻擋／中止一律往上拋，由呼叫端決定措辭；
+      // 其餘錯誤（配額滿、找不到、中止等原生 DOMException）維持既有的寬容
+      // fallback，讓呼叫端以回傳值判斷成敗而不是被例外中斷流程。
+      if (isVaultSignal(err)) throw err;
       console.warn("IndexedDB Clear All failed:", err);
       return false;
     }
@@ -273,10 +317,11 @@ export class RehabCounselorDB {
         tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "寫入中繼資料的交易被中止。"));
       }, OP_TIMEOUT_MS, "寫入中繼資料逾時。");
     } catch (err) {
-      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
-      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
-      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
-      if (err && err.code) throw err;
+      // 「沒有回應」絕不可被靜默當成「沒有資料」—— 那會讓同工看到空白歷史
+      // 而以為紀錄遺失。逾時／阻擋／中止一律往上拋，由呼叫端決定措辭；
+      // 其餘錯誤（配額滿、找不到、中止等原生 DOMException）維持既有的寬容
+      // fallback，讓呼叫端以回傳值判斷成敗而不是被例外中斷流程。
+      if (isVaultSignal(err)) throw err;
       console.warn("IndexedDB setMeta failed:", err);
       return false;
     }
@@ -293,10 +338,11 @@ export class RehabCounselorDB {
         tx.onabort = () => reject(vaultError(VAULT_ERROR.ABORTED, "讀取中繼資料的交易被中止。"));
       }, OP_TIMEOUT_MS, "讀取中繼資料逾時。");
     } catch (err) {
-      // Milestone 8：「沒有回應」絕不可被靜默當成「沒有資料」——
-      // 那會讓同工看到空白歷史而以為紀錄遺失。逾時／阻擋／中止一律往上拋，
-      // 由呼叫端決定措辭；其餘錯誤維持既有的寬容 fallback。
-      if (err && err.code) throw err;
+      // 「沒有回應」絕不可被靜默當成「沒有資料」—— 那會讓同工看到空白歷史
+      // 而以為紀錄遺失。逾時／阻擋／中止一律往上拋，由呼叫端決定措辭；
+      // 其餘錯誤（配額滿、找不到、中止等原生 DOMException）維持既有的寬容
+      // fallback，讓呼叫端以回傳值判斷成敗而不是被例外中斷流程。
+      if (isVaultSignal(err)) throw err;
       console.warn("IndexedDB getMeta failed:", err);
       return null;
     }
@@ -308,15 +354,13 @@ export class RehabCounselorDB {
       await this.open();
       return { available: true, reason: null, message: null };
     } catch (err) {
-      // Milestone 8：回報**為什麼**打不開，不只是「打不開」。
-      // blocked／timeout 代表紀錄很可能還好端端在 IndexedDB 裡，只是現在讀不到；
-      // 其餘（無痕模式等）才是真的不能用。兩者對同工的意義完全相反，
-      // 措辭不能共用一句「IndexedDB 不可用，可能為無痕瀏覽視窗」。
-      const reason =
-        err && err.code === VAULT_ERROR.BLOCKED ? "blocked" :
-        err && err.code === VAULT_ERROR.TIMEOUT ? "timeout" :
-        "unavailable";
-      return { available: false, reason, message: (err && err.message) || String(err) };
+      // 回報**為什麼**打不開，不只是「打不開」。分類集中在 classifyVaultError()，
+      // 與 app.js 共用同一份判定。
+      return {
+        available: false,
+        reason: classifyVaultError(err),
+        message: (err && err.message) || String(err)
+      };
     }
   }
 
@@ -435,6 +479,8 @@ export class RehabCounselorDB {
       }
     };
 
+    const rawTheoryProgress = localStorage.getItem("rehab_theory_progress");
+
     const settings = {};
     for (const key of EXPORTABLE_SETTINGS) {
       const val = localStorage.getItem(key);
@@ -452,7 +498,11 @@ export class RehabCounselorDB {
         completedCount: sessions.length,
         completedIds: [...new Set(sessions.map(s => s && s.caseId).filter(Boolean))],
         achievements: readJSON("rehab_unlocked_achievements", []),
-        theoryProgress: readJSON("rehab_theory_progress", {}),
+        // ⚠️ 鍵不存在時**不輸出此欄位**（undefined），而不是寫入 {}。
+        //    舊版以 {} 為預設，還原後 state.theoryProgress.act 成為 undefined，
+        //    儀表板與分析頁存取 .act.info 即拋錯、畫面空白（ARCHITECTURE §7 D33）。
+        //    importFullBackupJSON() 既有的 `!== undefined` 條件因此會正確跳過。
+        theoryProgress: rawTheoryProgress === null ? undefined : readJSON("rehab_theory_progress", undefined),
         settings,
         customCases,
         sessions
