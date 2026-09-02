@@ -4250,3 +4250,112 @@ body {
 .vault-write-recovered-title {
   color: var(--accent-green);
 }
+
+/* ==========================================================================
+   Milestone 9：每日 AI 呼叫額度（PRD「Usage Guardrail」）
+   ========================================================================== */
+
+.daily-usage-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--nested-bg-light);
+  border: 1px solid var(--card-border);
+}
+
+.daily-usage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.daily-usage-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--text-bright);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.daily-usage-figure {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.daily-usage-figure strong {
+  color: var(--text-bright);
+}
+
+/* 接近上限時轉琥珀 —— 同工需要在用完之前就知道，而不是用完才發現。 */
+.daily-usage-figure-warn,
+.daily-usage-figure-warn strong {
+  color: var(--accent-amber);
+}
+
+.daily-usage-bar {
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.18);
+}
+
+.daily-usage-bar-fill {
+  height: 100%;
+  background: var(--accent-cyan);
+  transition: width 0.3s ease;
+}
+
+.daily-usage-bar-warn {
+  background: var(--accent-amber);
+}
+
+.daily-usage-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.daily-usage-cap-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.daily-usage-cap-input {
+  width: 92px;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+  background: var(--nested-bg-medium);
+  color: var(--text-bright);
+}
+
+.daily-usage-cap-range {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.daily-usage-hint {
+  margin: 8px 0 0;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+[data-theme="light"] .daily-usage-bar {
+  background: rgba(15, 23, 42, 0.12);
+}
+
+/* 註：此處刻意**不**覆寫 .daily-usage-cap-input 的底色。
+   設定頁既有的 `.form-group input` 特異度較高且在兩個主題下都是深底白字
+   （ARCHITECTURE §8 記錄的既有淺色主題問題）。若只把這一個輸入框改成淺色，
+   它會與旁邊的 Gemini 金鑰輸入框長得不一樣 —— 那比一致地沿用既有樣式更糟。
+   整個設定頁的淺色主題屬 §8 的設計系統工作，不在本里程碑範圍。 */

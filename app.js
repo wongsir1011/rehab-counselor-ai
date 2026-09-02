@@ -1,7 +1,7 @@
 // RehabCounselor AI - 主應用控制器 (Vanilla SPA Engine)
 
 import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260829_v24_m7";
-import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions, getScriptedFlow } from "./geminiService.js?v=20260828_v23_m6b";
+import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions, getScriptedFlow, getDailyUsage, setDailyCap, MIN_DAILY_CAP, MAX_DAILY_CAP } from "./geminiService.js?v=20260831_v27_m9";
 import { RehabCounselorDB, classifyVaultError } from "./src/utils/db.js?v=20260831_v26_m8fix";
 
 // Global App State
@@ -84,6 +84,77 @@ const state = {
  *
  * ⚠️ 這是**補齊，不是重置**：既有的 true 一律保留，只補上缺失的鍵。
  */
+/**
+ * Milestone 9 / PRD「Security & Secrets」：
+ * 「Model output is rendered as text, never as markup, so **imported case
+ *   content cannot reach the browser through it**」
+ *
+ * 純字串 escape，供**所有不受信任資料**的模板插入使用：AI 產出（督導提示、
+ * 評估總結、生成的測驗）與個案內容（AI 合成或由他人基因碼匯入）。
+ *
+ * ⚠️ 必須連引號一起 escape。app.js 有一處把個案資料放進**屬性值**
+ * （`data-text="${f.text}"`），只擋 `<` 無法防止屬性逃脫。
+ * Milestone 8 的 escapeHtmlText() 是 DOM-based 且不處理引號，
+ * 保留給錯誤訊息（元素內容位置）使用，不可用於此處。
+ *
+ * 刻意**不**區分「受信任」與否：內建個案與匯入個案走同一條渲染路徑
+ * （都在 state.cases），試圖分辨只會製造遺漏。對內建資料 escape 無副作用。
+ */
+/**
+ * Milestone 9：把匯入的個案「基因碼」重建為只含已知欄位的乾淨物件。
+ *
+ * 白名單涵蓋 mockData.js 個案物件的全部欄位，外加合成個案會用到的
+ * previous_job_zh 與 diagnostic。未列入者一律丟棄 —— 包含 __proto__ 這類
+ * 原型污染載體，以及任何未來新增渲染點才會被讀到的欄位。
+ *
+ * 型別不符即丟棄該欄位而非整筆拒絕：一個字串欄位變成物件通常是編碼錯誤，
+ * 不該讓同工失去整個個案；但缺少必要欄位（呼叫端已先檢查）仍然拒絕。
+ */
+function sanitizeImportedCase(raw) {
+  const STRING_FIELDS = [
+    "id", "name", "gender", "avatar", "health_condition", "diagnostic",
+    "previous_job", "previous_job_zh", "emotional_state", "family",
+    "welfare", "category", "initial_dialogue"
+  ];
+  const out = Object.create(null);
+
+  for (const f of STRING_FIELDS) {
+    if (typeof raw[f] === "string") out[f] = raw[f];
+  }
+  if (typeof raw.age === "number" && Number.isFinite(raw.age)) out.age = raw.age;
+  else if (typeof raw.age === "string" && raw.age.trim()) out.age = raw.age;
+
+  // icf_factors：陣列，每項只保留 text 與 type 兩個字串欄位。
+  if (Array.isArray(raw.icf_factors)) {
+    out.icf_factors = raw.icf_factors
+      .filter(x => x && typeof x === "object")
+      .map(x => ({
+        text: typeof x.text === "string" ? x.text : "",
+        type: typeof x.type === "string" ? x.type : ""
+      }))
+      .filter(x => x.text);
+  }
+
+  // roleplay_flow：離線示範劇本，每項是字串或帶 text 的物件。
+  if (Array.isArray(raw.roleplay_flow)) {
+    out.roleplay_flow = raw.roleplay_flow
+      .map(x => (typeof x === "string" ? x : (x && typeof x.text === "string" ? x.text : null)))
+      .filter(Boolean);
+  }
+
+  // 轉回一般物件，避免 null 原型在既有程式碼中造成意外。
+  return Object.assign({}, out);
+}
+
+function escHtml(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function normalizeTheoryProgress(raw) {
   // ⚠️ 模組與步驟清單刻意放在函式**內部**：state 物件的初始化會呼叫本函式，
   //    而 state 在檔案中的位置早於此處。函式宣告會 hoist，`const` 不會 ——
@@ -513,8 +584,19 @@ async function persistCustomCases() {
  *   此前本函式回傳 undefined，成敗只以 alert 表達，畫面照樣寫「已存入保險箱」。
  */
 async function persistCompletedSession(session) {
-  state.historySessions.unshift(session);
-  return writeSessionToVault(session);
+  // Milestone 9 / C1：**先持久化，成功才收進記憶體**。
+  //
+  // 舊版第一行就 unshift，寫入失敗也不回滾，於是 state.historySessions 含有
+  // 保險箱裡不存在的紀錄。連帶後果不只是儀表板數字虛高 —— 徽章判定也讀這個
+  // 陣列，因此寫入失敗仍會發出「初試啼聲」，而徽章存在 localStorage 是持久的：
+  // 重載後保險箱 0 筆、歷史 0 張，徽章卻仍「已解鎖」，且對帳旗標已寫入不會再跑。
+  //
+  // 這同時是 PRD Data Ownership 那條原則套用到寫入路徑：
+  // 「must verify records landed before removing the old copy」——
+  // 先確認落地，才讓介面把它當成既有紀錄。
+  const result = await writeSessionToVault(session);
+  if (result.ok) state.historySessions.unshift(session);
+  return result;
 }
 
 /**
@@ -526,7 +608,10 @@ async function persistCompletedSession(session) {
 async function writeSessionToVault(session) {
   if (state.vaultMode === "localstorage-fallback") {
     try {
-      localStorage.setItem("rehab_sessions_history", JSON.stringify(state.historySessions));
+      // ⚠️ 不可寫 state.historySessions —— 呼叫端現在**在成功之後**才把 session
+      //    放進去，此刻它還不在陣列裡。先組出候選內容再寫，寫成功才由呼叫端更新記憶體。
+      const candidate = [session, ...state.historySessions];
+      localStorage.setItem("rehab_sessions_history", JSON.stringify(candidate));
       return { ok: true, reason: null };
     } catch (e) {
       console.error("[Vault] localStorage 降級寫入面談紀錄失敗（可能已超出配額）：", e);
@@ -898,6 +983,11 @@ async function initApp() {
 
   // 3c. Milestone 8：未完成的面談不得無聲消失。
   initUnsavedInterviewGuard();
+
+  // 3d. Milestone 9 / D8：清掉舊版寫入的診斷日誌。
+  //     該鍵含金鑰特徵（前 5 ＋ 後 4 字元）與明文 Group ID，屬 PRD 禁止持久化之列。
+  //     不主動清除的話，既有安裝的痕跡會永遠留在同工的瀏覽器裡。
+  try { localStorage.removeItem("rehab_minimax_debug_log"); } catch (e) {}
 
   // 4. Load default view (Dashboard)
   switchView("dashboard");
@@ -2592,11 +2682,11 @@ function renderICFTab(container) {
               <span style="font-size:0.85rem; color:var(--text-muted); font-weight:600;">選擇模擬案主：</span>
               <select id="icf-case-selector" class="glass-select" style="background: var(--nested-bg-darkest); border:1px solid var(--card-border); border-radius:6px; color:var(--text-bright); padding:4px 8px; font-size:0.82rem; cursor:pointer;">
                 ${state.cases.map(c => `
-                  <option value="${c.id}" ${c.id === selectedCase.id ? 'selected' : ''}>${c.name} (${c.gender}性，${c.age}歲，${state.locale === 'en' ? c.previous_job : (c.previous_job_zh || c.previous_job)})</option>
+                  <option value="${escHtml(c.id)}" ${c.id === selectedCase.id ? 'selected' : ''}>${escHtml(c.name)} (${escHtml(c.gender)}性，${escHtml(c.age)}歲，${escHtml(state.locale === 'en' ? c.previous_job : (c.previous_job_zh || c.previous_job))})</option>
                 `).join("")}
               </select>
             </div>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">當前案主特徵：${selectedCase.gender}性，${selectedCase.age}歲，${state.locale === 'en' ? selectedCase.previous_job : (selectedCase.previous_job_zh || selectedCase.previous_job)}</p>
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">當前案主特徵：${escHtml(selectedCase.gender)}性，${escHtml(selectedCase.age)}歲，${escHtml(state.locale === 'en' ? selectedCase.previous_job : (selectedCase.previous_job_zh || selectedCase.previous_job))}</p>
           </div>
           
           <div style="display:flex; align-items:center; gap:12px;">
@@ -2631,7 +2721,7 @@ function renderICFTab(container) {
             <div style="font-size:3.5rem; margin-bottom:16px;">🏆</div>
             <h4 style="font-size:1.4rem; font-weight:800; color:var(--text-bright); margin-bottom:8px;">完美達成全人 biopsychosocial 職業診斷！</h4>
             <p style="font-size:0.88rem; color:var(--text-muted); max-width:560px; margin:0 auto 20px; line-height:1.5;">
-              你已將案主 ${selectedCase.name} 的所有背景特徵因子 100% 精確地分類到 ICF 六大評估維度中。這對你編寫 SOAP 日誌的 Assessment 部分以及在模擬諮商中調配資源至關重要！
+              你已將案主 ${escHtml(selectedCase.name)} 的所有背景特徵因子 100% 精確地分類到 ICF 六大評估維度中。這對你編寫 SOAP 日誌的 Assessment 部分以及在模擬諮商中調配資源至關重要！
             </p>
             <button class="btn btn-primary" id="btn-restart-sandbox"><i class="fa-solid fa-arrows-rotate"></i> 重新模擬評估</button>
           </div>
@@ -2656,7 +2746,7 @@ function renderICFTab(container) {
                        id="${f.id}" 
                        data-type="${f.type}" 
                        style="font-size:0.82rem; cursor: grab; padding:10px 12px;">
-                    <i class="fa-solid fa-grip-vertical" style="color:var(--text-muted); margin-right:6px;"></i> ${f.text}
+                    <i class="fa-solid fa-grip-vertical" style="color:var(--text-muted); margin-right:6px;"></i> ${escHtml(f.text)}
                   </div>
                 `).join("")}
               </div>
@@ -2674,7 +2764,7 @@ function renderICFTab(container) {
                   <div class="zone-mount-point" style="display:flex; flex-direction:column; gap:6px;">
                     ${state.icfSandboxFactors.filter(f => f.mappedZone === 'health_condition').map(f => `
                       <span class="spring-snapped" style="font-size:0.75rem; background:rgba(244,63,94,0.08); border:1px solid rgba(244,63,94,0.25); border-radius:4px; padding:4px 8px; color:var(--text-bright);">
-                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${f.text}
+                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${escHtml(f.text)}
                       </span>
                     `).join("")}
                   </div>
@@ -2688,7 +2778,7 @@ function renderICFTab(container) {
                   <div class="zone-mount-point" style="display:flex; flex-direction:column; gap:6px;">
                     ${state.icfSandboxFactors.filter(f => f.mappedZone === 'body_functions').map(f => `
                       <span class="spring-snapped" style="font-size:0.75rem; background:rgba(124,58,237,0.08); border:1px solid rgba(124,58,237,0.25); border-radius:4px; padding:4px 8px; color:var(--text-bright);">
-                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${f.text}
+                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${escHtml(f.text)}
                       </span>
                     `).join("")}
                   </div>
@@ -2702,7 +2792,7 @@ function renderICFTab(container) {
                   <div class="zone-mount-point" style="display:flex; flex-direction:column; gap:6px;">
                     ${state.icfSandboxFactors.filter(f => f.mappedZone === 'activities').map(f => `
                       <span class="spring-snapped" style="font-size:0.75rem; background:rgba(6,182,212,0.08); border:1px solid rgba(6,182,212,0.25); border-radius:4px; padding:4px 8px; color:var(--text-bright);">
-                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${f.text}
+                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${escHtml(f.text)}
                       </span>
                     `).join("")}
                   </div>
@@ -2716,7 +2806,7 @@ function renderICFTab(container) {
                   <div class="zone-mount-point" style="display:flex; flex-direction:column; gap:6px;">
                     ${state.icfSandboxFactors.filter(f => f.mappedZone === 'participation').map(f => `
                       <span class="spring-snapped" style="font-size:0.75rem; background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.25); border-radius:4px; padding:4px 8px; color:var(--text-bright);">
-                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${f.text}
+                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${escHtml(f.text)}
                       </span>
                     `).join("")}
                   </div>
@@ -2730,7 +2820,7 @@ function renderICFTab(container) {
                   <div class="zone-mount-point" style="display:flex; flex-direction:column; gap:6px;">
                     ${state.icfSandboxFactors.filter(f => f.mappedZone === 'environmental_factors').map(f => `
                       <span class="spring-snapped" style="font-size:0.75rem; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:4px; padding:4px 8px; color:var(--text-bright);">
-                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${f.text}
+                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${escHtml(f.text)}
                       </span>
                     `).join("")}
                   </div>
@@ -2744,7 +2834,7 @@ function renderICFTab(container) {
                   <div class="zone-mount-point" style="display:flex; flex-direction:column; gap:6px;">
                     ${state.icfSandboxFactors.filter(f => f.mappedZone === 'personal_factors').map(f => `
                       <span class="spring-snapped" style="font-size:0.75rem; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.15); border-radius:4px; padding:4px 8px; color:var(--text-bright);">
-                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${f.text}
+                        <i class="fa-solid fa-circle-check" style="color:var(--accent-green);"></i> ${escHtml(f.text)}
                       </span>
                     `).join("")}
                   </div>
@@ -2854,7 +2944,7 @@ function evaluateICFSandboxMatch(factorId, zoneType, zoneEl, container, clientX,
     else if (factor.type === "environmental_factors") feedback = "環境因素包含物理環境、改裝補貼、以及僱主對殘疾人士的態度。這是我們進行合理便利（Reasonable Accommodation）的最佳抓手。";
     else if (factor.type === "personal_factors") feedback = "案主的個人背景特性（如年齡、學歷、價值觀）並非健康問題，但卻是我們激發其改變動機的最佳切入點。";
 
-    state.icfSandboxStatus = `【精準分類！】『${factor.text}』百分之百屬於『${getICFCategoryChineseName(zoneType)}』。${feedback}`;
+    state.icfSandboxStatus = `【精準分類！】『${escHtml(factor.text)}』百分之百屬於『${getICFCategoryChineseName(zoneType)}』。${feedback}`;
     state.icfSandboxStatusType = "success";
 
     // Play spectacular particle burst!
@@ -2870,10 +2960,10 @@ function evaluateICFSandboxMatch(factorId, zoneType, zoneEl, container, clientX,
         saveTheoryProgress();
       }
       state.icfSandboxStatus = state.locale === "en"
-        ? `【Mission Accomplished!】 Congratulations on completing the biopsychosocial diagnosis for ${selectedCase.name}!`
+        ? `【Mission Accomplished!】 Congratulations on completing the biopsychosocial diagnosis for ${escHtml(selectedCase.name)}!`
         : state.locale === "zh-CN"
-        ? `【大功告成！】恭喜同工完成${selectedCase.name}的全人 biopsychosocial 职业复康诊断！`
-        : `【大功告成！】恭喜同工完成${selectedCase.name}的全人 biopsychosocial 職業復康診斷！`;
+        ? `【大功告成！】恭喜同工完成${escHtml(selectedCase.name)}的全人 biopsychosocial 职业复康诊断！`
+        : `【大功告成！】恭喜同工完成${escHtml(selectedCase.name)}的全人 biopsychosocial 職業復康診斷！`;
     }
 
     renderICFTab(container);
@@ -2891,7 +2981,7 @@ function evaluateICFSandboxMatch(factorId, zoneType, zoneEl, container, clientX,
     else if (factor.type === "environmental_factors") hint = "這關乎外界環境的影響，如無障礙通道、僱主的態度、或是培訓局的課程和津貼支持。";
     else if (factor.type === "personal_factors") hint = "這屬於案主個人的背景特性、過往工作年資、或其對特定事物的內在信念與焦慮。";
 
-    state.icfSandboxStatus = `【診斷校正提示】同工，『${factor.text}』不能歸入『${getICFCategoryChineseName(zoneType)}』中。提示：${hint}請重新審視並再次嘗試！`;
+    state.icfSandboxStatus = `【診斷校正提示】同工，『${escHtml(factor.text)}』不能歸入『${getICFCategoryChineseName(zoneType)}』中。提示：${hint}請重新審視並再次嘗試！`;
     state.icfSandboxStatusType = "error";
 
     renderICFTab(container); // refresh status banner
@@ -3147,26 +3237,26 @@ function renderCaseCatalog(container) {
           ${isCustom ? `<div class="dossier-tag-custom"><i class="fa-solid fa-sparkles"></i> AI 基因合成</div>` : ""}
           <div style="transform-style: preserve-3d;">
             <div class="dossier-header" style="transform-style: preserve-3d;">
-              <div class="dossier-avatar-container">${c.avatar || "👤"}</div>
-              <span class="dossier-badge-glow">${c.age}歲 / ${c.gender}</span>
+              <div class="dossier-avatar-container">${escHtml(c.avatar || "👤")}</div>
+              <span class="dossier-badge-glow">${escHtml(c.age)}歲 / ${escHtml(c.gender)}</span>
             </div>
             
-            <h3 class="dossier-title">${c.name}</h3>
-            <p class="dossier-diag"><i class="fa-solid fa-dna"></i> 診斷：${c.health_condition}</p>
+            <h3 class="dossier-title">${escHtml(c.name)}</h3>
+            <p class="dossier-diag"><i class="fa-solid fa-dna"></i> 診斷：${escHtml(c.health_condition)}</p>
             
             <table class="dossier-tech-table" style="transform-style: preserve-3d;">
               <tr style="transform-style: preserve-3d;">
                 <td class="label-cell">過往前職</td>
-                <td class="val-cell">${c.previous_job || "無資料"}</td>
+                <td class="val-cell">${escHtml(c.previous_job || "無資料")}</td>
               </tr>
               <tr style="transform-style: preserve-3d;">
                 <td class="label-cell">家庭福利</td>
-                <td class="val-cell">${c.family || "無資料"}</td>
+                <td class="val-cell">${escHtml(c.family || "無資料")}</td>
               </tr>
               <tr style="transform-style: preserve-3d;">
                 <td class="label-cell">心理特徵</td>
                 <td class="val-cell" style="text-overflow: ellipsis; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-height: 40px; line-height: 1.3;">
-                  ${c.emotional_state || "無資料"}
+                  ${escHtml(c.emotional_state || "無資料")}
                 </td>
               </tr>
             </table>
@@ -3576,11 +3666,19 @@ function renderCaseGenerator(container) {
       return;
     }
     try {
-      const decodedData = JSON.parse(decodeURIComponent(escape(atob(code))));
-      if (!decodedData.id || !decodedData.name || !decodedData.health_condition) {
+      const raw = JSON.parse(decodeURIComponent(escape(atob(code))));
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("個案數據格式不正確！");
+      }
+      if (!raw.id || !raw.name || !raw.health_condition) {
         throw new Error("個案數據格式不完整！");
       }
-      
+
+      // Milestone 9：以**白名單重建**個案物件，而不是原樣採用解碼結果。
+      // 舊版只檢查三個欄位存在，其餘任意欄位（含 __proto__、onclick、腳本片段）
+      // 直接進入 state.cases 並由 persistCustomCases() 永久寫入保險箱。
+      // 這是縱深防禦的第一層：白名單擋未知欄位，escHtml() 擋已知欄位裡的惡意內容。
+      const decodedData = sanitizeImportedCase(raw);
       decodedData.id = `imported_${Date.now()}`;
       state.cases.unshift(decodedData);
       
@@ -3589,7 +3687,9 @@ function renderCaseGenerator(container) {
       await persistCustomCases();
       
       checkAndUnlockAchievements("case_creator");
-      alert(`🎉 成功導入個案：${decodedData.name} (${decodedData.health_condition})！已存入大廳。`);
+      const droppedCount = Object.keys(raw).filter(k => !(k in decodedData)).length;
+      alert(`🎉 成功導入個案：${decodedData.name} (${decodedData.health_condition})！已存入大廳。`
+        + (droppedCount > 0 ? `\n\n（基因碼中有 ${droppedCount} 個未知欄位未被採用，僅匯入本平台已知的個案欄位。）` : ""));
       
       const catalogBtn = document.getElementById("view-cases-catalog-btn");
       if (catalogBtn) catalogBtn.click();
@@ -3834,9 +3934,9 @@ function renderOfflineScriptUnavailable(selectedCase) {
   const mount = document.getElementById("content-view-mount");
   mount.innerHTML = `
     <div class="glass-card" style="max-width:620px; margin:40px auto; padding:32px; display:flex; flex-direction:column; gap:18px; text-align:center; align-items:center;">
-      <div style="font-size:2.6rem; line-height:1;">${selectedCase.avatar || "👤"}</div>
+      <div style="font-size:2.6rem; line-height:1;">${escHtml(selectedCase.avatar || "👤")}</div>
       <div>
-        <h3 style="font-size:1.1rem; font-weight:800; color:var(--text-bright); margin-bottom:6px;">${selectedCase.name} 未附示範劇本</h3>
+        <h3 style="font-size:1.1rem; font-weight:800; color:var(--text-bright); margin-bottom:6px;">${escHtml(selectedCase.name)} 未附示範劇本</h3>
         <p style="font-size:0.86rem; color:var(--text-muted); line-height:1.7;">
           你目前處於<b style="color:var(--accent-amber);">離線示範模式（未配置 API 金鑰）</b>。<br>
           離線模式只能播放個案自帶的預設劇本，而此個案沒有。<br>
@@ -3909,10 +4009,10 @@ function startRoleplaySession(selectedCase) {
         <!-- Case Info Header & System Speech Helper Notice -->
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; background:rgba(255,255,255,0.03); padding:8px 16px; border-radius:10px; border:1px solid var(--card-border);">
           <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:1.5rem;" id="rp-active-avatar" class="active-rp-avatar">${selectedCase.avatar}</span>
+            <span style="font-size:1.5rem;" id="rp-active-avatar" class="active-rp-avatar">${escHtml(selectedCase.avatar)}</span>
             <div>
-              <h4 style="font-weight:800; color:var(--text-bright); font-size:0.95rem;">${selectedCase.name}</h4>
-              <p style="font-size:0.75rem; color:var(--text-muted);">${selectedCase.health_condition} | ${selectedCase.age}歲</p>
+              <h4 style="font-weight:800; color:var(--text-bright); font-size:0.95rem;">${escHtml(selectedCase.name)}</h4>
+              <p style="font-size:0.75rem; color:var(--text-muted);">${escHtml(selectedCase.health_condition)} | ${escHtml(selectedCase.age)}歲</p>
             </div>
           </div>
           <button id="rp-speech-toggle-btn" class="speech-control-toggle ${state.isSpeechMuted ? 'muted' : ''}" title="${state.isSpeechMuted ? '點擊開啟案主自動語音朗讀' : '點擊靜音案主自動語音朗讀'}">
@@ -4388,7 +4488,7 @@ async function submitMessageToAI(text) {
     //    仍可由同工手動收合，但絕不預設隱藏。
     const coachFeedback = document.getElementById("rp-coach-feedback");
     if (coachFeedback) {
-      coachFeedback.innerHTML = coachHint.replace(/\n/g, "<br>");
+      coachFeedback.innerHTML = escHtml(coachHint).replace(/\n/g, "<br>");
       coachFeedback.style.color = "var(--text-main)";
       setCoachPanelVisible(true);
     }
@@ -4565,10 +4665,12 @@ function appendMiniMaxLog(line) {
   const formatted = `[${timeStr}] ${line}`;
   if (!state.minimaxLogs) state.minimaxLogs = [];
   state.minimaxLogs.push(formatted);
-  
-  try {
-    localStorage.setItem("rehab_minimax_debug_log", state.minimaxLogs.slice(-50).join("\n"));
-  } catch (e) {}
+
+  // Milestone 9 / D8：**刻意不再寫入 localStorage**。
+  // PRD Security & Secrets：金鑰「are never written to any persisted log」。
+  // 舊版把最後 50 行（含金鑰前 5 ＋ 後 4 字元與明文 Group ID）寫進
+  // rehab_minimax_debug_log，跨會話存活，把螢幕轉給督導時就在畫面上。
+  // 日誌現在只存在於本次會話的記憶體，關閉分頁即消失；按「測試發音」隨時重新產生。
 
   const logBox = document.getElementById("minimax-debug-log");
   if (logBox) {
@@ -4593,14 +4695,14 @@ async function fetchMiniMaxTTSAudio(text, voiceId, apiKey, groupId, isCn = false
     throw new Error("未提供 MiniMax API Key");
   }
 
-  // 遮蔽金鑰輸出以保護同工隱私 (如 sk-ab****1234)
-  const maskedKey = cleanKey.length > 10 
-    ? `${cleanKey.slice(0, 5)}****${cleanKey.slice(-4)} (長度: ${cleanKey.length})` 
-    : `**** (長度: ${cleanKey.length})`;
-  appendMiniMaxLog(`🔑 金鑰特徵：${maskedKey}`);
+  // D8：不再輸出金鑰的任何字元片段。診斷需要知道的是「長度對不對、格式是哪一種」，
+  // 不是字元本身 —— 前 5 ＋ 後 4 已足以識別一把金鑰，屬 PRD 禁止寫入日誌之列。
+  const keyShape = cleanKey.startsWith("sk-") ? "sk- 標準格式" : (cleanKey.split(".").length === 3 ? "JWT 格式" : "未知格式");
+  appendMiniMaxLog(`🔑 金鑰已提供（${keyShape}，長度 ${cleanKey.length}）`);
 
   if (autoGid) {
-    appendMiniMaxLog(`🔍 從 JWT 金鑰 Payload 中自動解析出 Group ID: ${autoGid}`);
+    // D8：只記錄「有沒有解析成功」，不輸出值 —— Group ID 是帳號識別。
+    appendMiniMaxLog(`🔍 已從 JWT 金鑰 Payload 自動解析出 Group ID（值不記入日誌）`);
   } else if (cleanKey.startsWith("sk-")) {
     appendMiniMaxLog(`ℹ️ 金鑰為 sk- 標準格式 (國內版 / 國際版開放平台 API Key)`);
   }
@@ -5085,7 +5187,7 @@ function renderVaultWriteFailureCard(persisted) {
         <i class="fa-solid fa-triangle-exclamation"></i> 這場面談<strong>未能存入保險箱</strong>
       </h4>
       <p class="vault-write-failure-body">
-        原因：${persisted.reason || "未知錯誤"}<br>
+        原因：${escHtml(persisted.reason || "未知錯誤")}<br>
         評估已經完成，下方內容都是真實的，但它<strong>還沒有持久副本</strong> ——
         關閉分頁就會失去。
       </p>
@@ -5121,6 +5223,8 @@ function bindVaultRetryWrite() {
     const result = await writeSessionToVault(pendingVaultWrite);
 
     if (result.ok) {
+      // C1：第一次寫入失敗時沒有進記憶體，因此這裡是該筆唯一一次加入，不會重複。
+      state.historySessions.unshift(pendingVaultWrite);
       pendingVaultWrite = null;
       if (state.activeSession) state.activeSession.vaultedAt = new Date().toISOString();
       AudioSynth.playSuccess();
@@ -5320,7 +5424,7 @@ function renderSessionReport(container, report, persisted) {
         <h3 style="font-size:1.15rem; font-weight:800; color:var(--text-bright);"><i class="fa-solid fa-user-tie" style="color:var(--accent-cyan);"></i> 臨床總結督導報告 (Clinical Summary)</h3>
         ${practiceSupportNoticeHTML("margin:0;")}
         <p style="font-size:0.95rem; color:var(--text-main); line-height:1.6; background:rgba(255,255,255,0.02); padding:16px; border-radius:10px; border-left:4px solid var(--accent-cyan);">
-          ${report.summary.replace(/\n/g, "<br>")}
+          ${escHtml(report.summary).replace(/\n/g, "<br>")}
         </p>
 
         <!-- Dynamic Notes Displayed -->
@@ -5376,8 +5480,8 @@ function startICFAssessment(selectedCase) {
         
         <div id="icf-factor-pool" style="display:flex; flex-direction:column; gap:8px; overflow-y:auto; max-height:450px;">
           ${factors.map((f, idx) => `
-            <div class="icf-source-factor" draggable="true" id="icf-factor-${idx}" data-type="${f.type}" data-text="${f.text}">
-              <i class="fa-solid fa-grip-vertical" style="color:var(--text-muted); margin-right:6px;"></i> ${f.text}
+            <div class="icf-source-factor" draggable="true" id="icf-factor-${idx}" data-type="${escHtml(f.type)}" data-text="${escHtml(f.text)}">
+              <i class="fa-solid fa-grip-vertical" style="color:var(--text-muted); margin-right:6px;"></i> ${escHtml(f.text)}
             </div>
           `).join("")}
         </div>
@@ -5588,7 +5692,7 @@ function evaluateICFMapping() {
       <ul style="list-style:none; display:flex; flex-direction:column; gap:10px; font-size:0.82rem;">
         ${incorrectList.map(item => `
           <li style="background:rgba(244,63,94,0.06); padding:8px 12px; border-radius:6px; border-left:3px solid var(--accent-rose);">
-            <strong>「${item.text}」</strong><br>
+            <strong>「${escHtml(item.text)}」</strong><br>
             <span style="color:var(--text-muted);">你放入了：</span><span style="color:var(--accent-rose); font-weight:700;">${getICFName(item.placed)}</span> | 
             <span style="color:var(--text-muted);">專家建議放入：</span><span style="color:var(--accent-green); font-weight:700;">${getICFName(item.correct)}</span>
           </li>
@@ -5769,13 +5873,13 @@ function renderCoQuestion(qIdx) {
     <div style="background:rgba(255,255,255,0.02); border-radius:10px; padding:20px; border:1px solid var(--card-border);">
       <h4 style="font-size:1.05rem; font-weight:800; color:var(--text-bright); margin-bottom:16px; line-height:1.5;">
         <i class="fa-solid fa-question-circle" style="color:var(--accent-purple);"></i>
-        ${state.locale === "en" ? "Discussion Question" : "討論題"} ${qIdx + 1}：${quiz.question}
+        ${state.locale === "en" ? "Discussion Question" : "討論題"} ${qIdx + 1}：${escHtml(quiz.question)}
       </h4>
       <div style="display:flex; flex-direction:column; gap:12px;">
         ${quiz.options.map((opt, idx) => `
           <button class="btn co-option-btn projector-option" data-idx="${idx}" style="position:relative; text-align:left; justify-content:space-between; display:flex; align-items:center; width:100%; font-size:0.92rem; font-weight:700; padding:14px 20px; overflow:hidden; border-color:rgba(255,255,255,0.08); transition:var(--transition-smooth);">
             <span class="poll-bg-bar" style="position:absolute; left:0; top:0; bottom:0; width:0%; background:var(--accent-purple); opacity:0.12; transition:width 0.8s cubic-bezier(0.1, 0.8, 0.2, 1); z-index:1;"></span>
-            <span style="position:relative; z-index:2;">${String.fromCharCode(65 + idx)}. ${opt}</span>
+            <span style="position:relative; z-index:2;">${String.fromCharCode(65 + idx)}. ${escHtml(opt)}</span>
             <span class="poll-percent-text" style="position:relative; z-index:2; font-family:monospace; font-size:0.85rem; opacity:0; transition:opacity 0.4s ease; color:var(--text-muted); font-weight:800;">0%</span>
           </button>
         `).join("")}
@@ -5843,7 +5947,7 @@ function renderCoQuestion(qIdx) {
 
       fb.style.display = "block";
       fb.innerHTML = `
-        <strong>【${state.locale === "en" ? "Analysis" : "小組引導解析"}】</strong>：${quiz.explanation}<br><br>
+        <strong>【${state.locale === "en" ? "Analysis" : "小組引導解析"}】</strong>：${escHtml(quiz.explanation)}<br><br>
         <button class="btn btn-primary" id="co-quiz-next-btn">${state.locale === "en" ? "Next Question" : "進入下一討論"} <i class="fa-solid fa-arrow-right"></i></button>
       `;
 
@@ -5871,13 +5975,13 @@ function renderCustomQuizQuestions(quizData, qIdx, container) {
     <div style="display:flex; flex-direction:column; gap:12px;">
       <h4 style="font-size:0.95rem; font-weight:800; color:var(--text-bright); line-height:1.4;">
         <i class="fa-solid fa-sparkles" style="color:var(--accent-green);"></i>
-        ${state.locale === "en" ? "Question" : "研討題"} ${qIdx + 1}：${quiz.question}
+        ${state.locale === "en" ? "Question" : "研討題"} ${qIdx + 1}：${escHtml(quiz.question)}
       </h4>
       <div style="display:flex; flex-direction:column; gap:8px;">
         ${quiz.options.map((opt, idx) => `
           <button class="btn ai-custom-opt-btn projector-option" data-idx="${idx}" style="position:relative; text-align:left; justify-content:space-between; display:flex; align-items:center; width:100%; font-size:0.88rem; font-weight:700; padding:10px 14px; overflow:hidden; border-radius:8px; border-color:rgba(255,255,255,0.06); transition:var(--transition-smooth);">
             <span class="poll-bg-bar" style="position:absolute; left:0; top:0; bottom:0; width:0%; background:var(--accent-purple); opacity:0.12; transition:width 0.8s cubic-bezier(0.1, 0.8, 0.2, 1); z-index:1;"></span>
-            <span style="position:relative; z-index:2;">${String.fromCharCode(65 + idx)}. ${opt}</span>
+            <span style="position:relative; z-index:2;">${String.fromCharCode(65 + idx)}. ${escHtml(opt)}</span>
             <span class="poll-percent-text" style="position:relative; z-index:2; font-family:monospace; font-size:0.78rem; opacity:0; transition:opacity 0.4s ease; color:var(--text-muted); font-weight:800;">0%</span>
           </button>
         `).join("")}
@@ -5943,7 +6047,7 @@ function renderCustomQuizQuestions(quizData, qIdx, container) {
 
       fb.style.display = "block";
       fb.innerHTML = `
-        <strong>【${state.locale === "en" ? "Analysis" : "小組引導解析"}】</strong>：${quiz.explanation}<br><br>
+        <strong>【${state.locale === "en" ? "Analysis" : "小組引導解析"}】</strong>：${escHtml(quiz.explanation)}<br><br>
         <button class="btn btn-primary" id="ai-custom-next-btn" style="padding:6px 12px; font-size:0.75rem;">
           ${state.locale === "en" ? "Next Question" : "進入下一討論"} <i class="fa-solid fa-arrow-right"></i>
         </button>
@@ -6284,11 +6388,11 @@ function renderAnalytics(container) {
           return `
             <div class="history-card" data-session-id="${session.id}">
               <div class="history-card-header">
-                <span class="history-card-avatar">${session.caseAvatar}</span>
+                <span class="history-card-avatar">${escHtml(session.caseAvatar)}</span>
                 <span class="history-card-date">${session.date}</span>
               </div>
-              <div class="history-card-name">${session.caseName}</div>
-              <div class="history-card-diag">${session.caseDiagnostic}</div>
+              <div class="history-card-name">${escHtml(session.caseName)}</div>
+              <div class="history-card-diag">${escHtml(session.caseDiagnostic)}</div>
               <div class="history-card-scores">
                 ${evaluated ? `
                   <span class="history-score-tag high">${state.locale === "en" ? "Avg" : "平均"} ${avgScore}分</span>
@@ -6719,7 +6823,7 @@ function showSessionDetailPopup(session) {
       <div class="popup-header">
         <h3 class="popup-title">
           <i class="fa-solid fa-folder-open" style="color:var(--accent-purple); margin-right:8px;"></i>
-          ${state.locale === "en" ? "Session Portfolio Review" : state.locale === "zh-CN" ? "面谈历程全息查看" : "面談歷程全息查看"}：${session.caseName}
+          ${state.locale === "en" ? "Session Portfolio Review" : state.locale === "zh-CN" ? "面谈历程全息查看" : "面談歷程全息查看"}：${escHtml(session.caseName)}
         </h3>
         <button class="btn btn-circle" id="popup-close-btn" style="border:none; background:transparent;" title="Close">
           <i class="fa-solid fa-xmark" style="font-size: 1.25rem;"></i>
@@ -6748,7 +6852,7 @@ function showSessionDetailPopup(session) {
                 <i class="fa-solid fa-user-tie" style="color:var(--accent-cyan);"></i> ${state.locale === "en" ? "Clinical Summary Feedback" : "督導意見總結"}
               </h4>
               <p style="font-size:0.8rem; color:var(--text-main); line-height:1.6; background:var(--nested-bg-faint); padding:12px; border-radius:8px; border-left:4px solid var(--accent-cyan); max-height:220px; overflow-y:auto;">
-                ${session.report.summary.replace(/\n/g, "<br>")}
+                ${escHtml(session.report.summary).replace(/\n/g, "<br>")}
               </p>
             </div>` : ""}
           </div>
@@ -6761,8 +6865,8 @@ function showSessionDetailPopup(session) {
               const isUser = msg.role === "user";
               return `
                 <div class="chat-bubble ${isUser ? 'bubble-user' : 'bubble-assistant'}${msg.scripted ? ' bubble-scripted' : ''}" style="margin: 4px 0; max-width: 80%; ${isUser ? 'align-self: flex-end;' : 'align-self: flex-start;'}">
-                  <div class="bubble-meta">${isUser ? (state.locale === "en" ? "Rehab Staff" : "諮商師(你)") : session.caseName}${msg.scripted ? `<span class="bubble-scripted-tag"><i class="fa-solid fa-clapperboard"></i> 示範劇本</span>` : ""}</div>
-                  <div class="bubble-text" style="font-size:0.85rem; line-height:1.5;">${msg.text}</div>
+                  <div class="bubble-meta">${isUser ? (state.locale === "en" ? "Rehab Staff" : "諮商師(你)") : escHtml(session.caseName)}${msg.scripted ? `<span class="bubble-scripted-tag"><i class="fa-solid fa-clapperboard"></i> 示範劇本</span>` : ""}</div>
+                  <div class="bubble-text" style="font-size:0.85rem; line-height:1.5;">${escHtml(msg.text)}</div>
                 </div>
               `;
             }).join("")}
@@ -6831,6 +6935,56 @@ function showSessionDetailPopup(session) {
 /* ==========================================================================
    View 8: Settings
    ========================================================================== */
+/**
+ * 每日 AI 呼叫額度面板。數字由 geminiService 的單一計數點提供，
+ * 此處只負責呈現與接收上限調整。
+ */
+/** 面板重繪後重新接上上限輸入事件。 */
+function bindDailyCapInput(input) {
+  if (!input) return;
+  input.addEventListener("change", () => {
+    const applied = setDailyCap(input.value);
+    if (String(applied) !== input.value.trim()) {
+      input.value = applied;
+      alert(`每日上限需介於 ${MIN_DAILY_CAP} 至 ${MAX_DAILY_CAP} 之間，已調整為 ${applied}。`);
+    }
+    const panel = input.closest(".daily-usage-panel");
+    if (panel) panel.outerHTML = renderDailyUsagePanel();
+    bindDailyCapInput(document.getElementById("set-daily-cap"));
+  });
+}
+
+function renderDailyUsagePanel() {
+  const { used, cap, remaining } = getDailyUsage();
+  const pct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+  const nearLimit = remaining <= Math.max(5, Math.round(cap * 0.1));
+
+  return `
+    <div class="daily-usage-panel">
+      <div class="daily-usage-header">
+        <span class="daily-usage-label"><i class="fa-solid fa-gauge-high"></i> 今日 AI 呼叫額度</span>
+        <span class="daily-usage-figure${nearLimit ? " daily-usage-figure-warn" : ""}">
+          已用 <strong>${used}</strong> / ${cap}　·　尚餘 <strong>${remaining}</strong> 次
+        </span>
+      </div>
+      <div class="daily-usage-bar" role="presentation">
+        <div class="daily-usage-bar-fill${nearLimit ? " daily-usage-bar-warn" : ""}" style="width:${pct}%;"></div>
+      </div>
+      <div class="daily-usage-controls">
+        <label for="set-daily-cap" class="daily-usage-cap-label">每日上限</label>
+        <input type="number" id="set-daily-cap" class="daily-usage-cap-input"
+               min="${MIN_DAILY_CAP}" max="${MAX_DAILY_CAP}" step="10" value="${cap}"
+               aria-describedby="daily-usage-hint">
+        <span class="daily-usage-cap-range">（${MIN_DAILY_CAP}–${MAX_DAILY_CAP}）</span>
+      </div>
+      <p class="daily-usage-hint" id="daily-usage-hint">
+        額度於<strong>明日自動重置</strong>。一次面談回合、一次評估報告、一次個案合成各計 1 次；
+        離線示範模式不會呼叫 AI，因此不計入。這是你自己的金鑰與帳單，上限可自行調整。
+      </p>
+    </div>
+  `;
+}
+
 function renderSettings(container) {
   container.innerHTML = `
     <div class="glass-card" style="max-width: 600px; margin: 0 auto; display:flex; flex-direction:column; gap:16px;">
@@ -6854,6 +7008,11 @@ function renderSettings(container) {
           <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
             🔑 金鑰直接存放於你本地瀏覽器的安全 localStorage 中，純前端直連 Google Gemini REST 端點，保障機構數據安全。如無金鑰，系統將以預設的高質量 Mock 數據運行離線體驗模式。
           </p>
+
+          <!-- Milestone 9 / PRD「Usage Guardrail」：緊鄰金鑰欄位顯示今日用量與剩餘額度。
+               目的不是省成本，而是讓用自費金鑰的同工心裡有數，
+               不會在面談進行到一半才發現額度用完。 -->
+          ${renderDailyUsagePanel()}
         </div>
 
         <div class="form-group">
@@ -6932,7 +7091,7 @@ function renderSettings(container) {
                   </button>
                 </div>
               </div>
-              <pre id="minimax-debug-log" style="background:#090d16; border:1px solid rgba(6,182,212,0.25); color:#38bdf8; padding:10px; border-radius:6px; font-size:0.72rem; max-height:180px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; font-family:monospace; line-height:1.4;">${(state.minimaxLogs && state.minimaxLogs.length > 0) ? state.minimaxLogs.join("\n") : (localStorage.getItem("rehab_minimax_debug_log") || "點擊上方「測試發音」按鈕後，此處將實時輸出連線握手、HTTP 狀態碼與 MiniMax 原始返回內容...")}</pre>
+              <pre id="minimax-debug-log" style="background:#090d16; border:1px solid rgba(6,182,212,0.25); color:#38bdf8; padding:10px; border-radius:6px; font-size:0.72rem; max-height:180px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; font-family:monospace; line-height:1.4;">${(state.minimaxLogs && state.minimaxLogs.length > 0) ? state.minimaxLogs.join("\n") : "點擊上方「測試發音」按鈕後，此處將實時輸出連線握手、HTTP 狀態碼與 MiniMax 原始返回內容...（日誌只保留在本次會話，不寫入本機儲存）"}</pre>
             </div>
           </div>
         </div>
@@ -7097,6 +7256,24 @@ function renderSettings(container) {
   }
 
   // Copy MiniMax Diagnostic Log
+  // Milestone 9：每日上限輸入。setDailyCap() 會把值夾在合法範圍內並回傳實際採用值，
+  // 因此輸入 0 或 99999 都不會產生無效設定 —— 直接回填實際值讓同工看見。
+  const capInput = document.getElementById("set-daily-cap");
+  if (capInput) {
+    const applyCap = () => {
+      const applied = setDailyCap(capInput.value);
+      if (String(applied) !== capInput.value.trim()) {
+        capInput.value = applied;
+        alert(`每日上限需介於 ${MIN_DAILY_CAP} 至 ${MAX_DAILY_CAP} 之間，已調整為 ${applied}。`);
+      }
+      const panel = capInput.closest(".daily-usage-panel");
+      if (panel) panel.outerHTML = renderDailyUsagePanel();
+      const again = document.getElementById("set-daily-cap");
+      if (again) bindDailyCapInput(again);
+    };
+    capInput.addEventListener("change", applyCap);
+  }
+
   const copyLogBtn = document.getElementById("btn-copy-minimax-log");
   if (copyLogBtn) {
     copyLogBtn.addEventListener("click", async () => {
@@ -7118,7 +7295,7 @@ function renderSettings(container) {
   if (clearLogBtn) {
     clearLogBtn.addEventListener("click", () => {
       state.minimaxLogs = [];
-      localStorage.removeItem("rehab_minimax_debug_log");
+      localStorage.removeItem("rehab_minimax_debug_log"); // 清掉舊版可能殘留的痕跡
       const logBox = document.getElementById("minimax-debug-log");
       if (logBox) logBox.textContent = "日誌已清空。點擊上方「測試發音」即可生成全新診斷日誌。";
     });
