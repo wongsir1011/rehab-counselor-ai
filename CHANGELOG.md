@@ -4,6 +4,61 @@
 
 ---
 
+## [v20260831_v26_m8fix] - 2026-08-31 15:23 (香港時間 UTC+8)
+
+## 🩹 Milestone 8 補完 —— 三項待修全部修正，里程碑完成
+
+時間來源：本機系統時鐘，原始值 `Mon Aug 31 07:23:52 UTC 2026`（`date -u`），系統時區 `Asia/Hong_Kong`，換算為 **2026-08-31 15:23 HKT**。
+
+計劃：[`plan/08-interview-never-vanishes.md`](plan/08-interview-never-vanishes.md) §11–§17（已批准 2026-08-31）
+
+### 🚨 D32 —— 寫入保險箱失敗不再丟掉整場面談
+根因是一行錯誤的述詞：`if (err && err.code) throw err` 本意只重拋自訂訊號，但**所有 `DOMException` 都帶 truthy 的數字 `.code`**。改為明確白名單 `isVaultSignal()` —— `VAULT_ERROR` 的值全是字串、`DOMException.code` 全是數字，型別已足以區分，再加 `Set` 白名單。
+
+**修正範圍不止於述詞。** 單改述詞只會退回 Milestone 8 之前：alert 警告後照常顯示「已存入保險箱」的報告頁 —— 那仍是 PRD 禁止的不實陳述。因此整條回報鏈一併修：
+
+*   `persistCompletedSession()` 回傳 `{ ok, reason }`（此前回 `undefined`，成敗只以 alert 表達）。
+*   拆出純寫入的 `writeSessionToVault()`，讓重試不會把同一場面談再 `unshift` 進記憶體一次。
+*   `vaultedAt` **只在寫入成功時設** —— 失敗時守衛繼續保護這場面談，因為它確實還沒有持久副本。
+*   兩個完成畫面依實際結果說話：標題變成「輔導能力評審報告**（未存入保險箱）**」，並顯示紅色警示卡說明真實原因。
+*   警示卡提供**「重試寫入保險箱」**：直接把同一份紀錄再送一次，**不重跑 AI 評估**（評估本來就成功了，重跑等於再消耗一次金鑰額度）。成功後就地更新：設 `vaultedAt`、卡片轉綠、標題移除「（未存入保險箱）」。
+*   危險區重設的 `clearAll()` 補上 `try` —— 此前拋錯即成為未處理的 rejection，重設半途中止而畫面毫無提示。
+
+### 🖥️ D33 —— 首次渲染拋例外不再是空白畫面
+根因：`theoryProgress` 的形狀在兩處各自帶預設值，但兩處都只在**鍵不存在**時才套用，存著 `"{}"` 就原樣通過。污染源是 `buildBackupJSON()` 以 `{}` 為預設。
+
+*   新增 `normalizeTheoryProgress()`，三個讀入點共用。**補齊不重置** —— 既有的 `true` 一律保留（實測：全 `true` 的紀錄往返後一字不變）。
+*   `buildBackupJSON()` 在鍵不存在時**不輸出該欄位**，`importFullBackupJSON()` 既有的 `!== undefined` 條件因此正確跳過。
+*   `initApp().catch()` 接上 UI：開機失敗畫面顯示真實錯誤與兩條出路（重新載入／前往設定匯出備份）。
+*   `switchView()` 的 render 呼叫包 `try/catch`：單頁渲染失敗顯示該頁錯誤卡，**消除了「標題說學習分析、內容是設定頁」**那種比空白更誤導的狀態。
+
+### 🗣️ D34 —— 降級措辭不再誤診
+分類合併為單一 `classifyVaultError()`，由 `probe()` 與 `vaultReasonFromError()` 共用（此前各有一套，兩份遲早分岔，而分岔的後果是對同工說錯「你的資料還在不在」）。新增 `version` 類別：「**你開啟的是舊版程式** … **你的面談紀錄沒有遺失** … 請強制重新整理」。`unavailable` 收窄至 `SecurityError`／`InvalidStateError` —— 真正不能用的情形。
+
+### 🧹 順帶處理（同一段程式碼，分開做等於二次進入）
+D36 覆蓋層還原 `mount` 的 inline `position`；D37 降級橫幅加去重；D38 刪除死 CSS `.notes-save-indicator`。**不碰** D35（IndexedDB 事件順序的固有行為）與 D39（已判定可接受）。
+
+### 🐛 建置期間抓到的兩個問題
+*   **TDZ 錯誤令整個 app 打不開**：第一版把 `THEORY_MODULES` 宣告為模組層 `const`，但 `state` 初始化位置更早且會呼叫 `normalizeTheoryProgress()` —— 函式宣告會 hoist，`const` 不會。`ReferenceError` 讓模組載入直接失敗。`check_syntax.py` 只檢查括號平衡，抓不到；是實跑時主控台抓到的。已改為函式內部區域常數。
+*   **警示卡承諾了走不到的路**：第一版寫「回到面談再按一次結束會話重試」，但報告頁只有匯出與返回兩顆按鈕。實測發現後改為直接提供重試按鈕。
+
+### ✅ 驗證（13 項，全部實跑）
+述詞隔離（十種錯誤形狀）；分類（九種）；**D32 主場景七個檢查點**；重試成功且記憶體與保險箱皆無重複；危險區重設；正常寫入回歸；正規化五種殘缺輸入含「既有 `true` 保留」；`"{}"` 端到端不再 crash；備份污染源；以真實原始碼注入故障測兩層渲染防護；`version` 措辭；D36／D37／D38；M5／M6／M7／M8 回歸；備份往返一致且無金鑰；乾淨載入主控台**零輸出**；深淺主題量測 computed style。
+
+### ⚠️ 未驗證
+真實 Gemini 金鑰端對端；MiniMax TTS 與連續 STT；ICF 沙盒拖放評分；理論 Hub 閃卡與自測；小組研討；AI 個案合成；SOAP 助手抽屜；Phase 13 干預注入；`localstorage-fallback` 下寫入失敗的完整流程（程式碼已改，未在真實降級環境實跑）。
+
+### 📦 變更檔案
+*   [src/utils/db.js](src/utils/db.js)：`isVaultSignal()`、`classifyVaultError()`；七個 `catch` 改述詞；`probe()` 委派分類；`buildBackupJSON()` 不再輸出空 `theoryProgress`。
+*   [app.js](app.js)：`normalizeTheoryProgress()`、`writeSessionToVault()`、`renderVaultWriteFailureCard()`、`bindVaultRetryWrite()`、`renderBootFailure()`、`renderViewFailure()`、`escapeHtmlText()`；`persistCompletedSession()` 回傳成敗；`vaultedAt` 條件設定；兩個完成畫面誠實化；`switchView()` render 保護；橫幅去重；覆蓋層還原 `position`；危險區重設 `try`。
+*   [index.css](index.css)：寫入失敗警示卡、開機／頁面錯誤卡、重試狀態樣式（含淺色覆寫）；刪除 `.notes-save-indicator` 兩條死規則。
+*   [index.html](index.html)：快取戳記 `v20260831_v26_m8fix`。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)、[Product_Roadmap.md](Product_Roadmap.md)、[plan/08-interview-never-vanishes.md](plan/08-interview-never-vanishes.md)。
+
+**未更動**：`PRD.md`（本次實作既有條款）、`CLAUDE.md`、`mockData.js`、`geminiService.js`、`DECISIONS.md`、`adr/`（ADR-0007 的 Follow-up 與 ADR-0008 的 Follow-up 所指的 D32／D33 已解決，兩份 ADR 依不可變原則保持原文）。
+
+---
+
 ## [review-m8] - 2026-08-31 13:28 (香港時間 UTC+8)
 
 ## 🔍 Milestone 8 同儕審查 —— 三項待修，狀態退回「待修」

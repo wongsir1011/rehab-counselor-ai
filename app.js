@@ -2,7 +2,7 @@
 
 import { MOCK_THEORY_DATA, MOCK_CASES, MOCK_CO_LEARNING_CASES, MOCK_MOTIVATIONAL_QUOTES, MOCK_ACHIEVEMENTS, TRANSLATIONS } from "./mockData.js?v=20260829_v24_m7";
 import { generateClientReply, generateCustomCase, generateSessionReport, generateCustomQuiz, generateSoapSuggestions, getScriptedFlow } from "./geminiService.js?v=20260828_v23_m6b";
-import { RehabCounselorDB } from "./src/utils/db.js?v=20260830_v25_m8";
+import { RehabCounselorDB, classifyVaultError } from "./src/utils/db.js?v=20260831_v26_m8fix";
 
 // Global App State
 const state = {
@@ -65,16 +65,40 @@ const state = {
   speechUtteranceRefs: new Set(),
   theoryProgress: (() => {
     const local = localStorage.getItem("rehab_theory_progress");
+    let parsed = null;
     if (local) {
-      try { return JSON.parse(local); } catch (e) {}
+      try { parsed = JSON.parse(local); } catch (e) { parsed = null; }
     }
-    return {
-      act: { info: false, flashcards: false, test: false },
-      mi: { info: false, flashcards: false, test: false },
-      icf: { info: false, flashcards: false, test: false }
-    };
+    // 一律經過正規化 —— 舊版在此直接回傳解析結果，"{}" 就這樣進了 state。
+    return normalizeTheoryProgress(parsed);
   })()
 };
+
+/**
+ * theoryProgress 的形狀正規化。
+ *
+ * 此前 state 初始化與 refreshStateFromLocalStorage() 各自帶一份完整預設，
+ * 但兩者都只在**鍵不存在**時才套用 —— 存著 "{}" 或殘缺物件時原樣回傳，
+ * 於是 state.theoryProgress.act 成為 undefined，儀表板與分析頁存取
+ * .act.info 立刻拋錯、整頁空白（ARCHITECTURE §7 D33）。
+ *
+ * ⚠️ 這是**補齊，不是重置**：既有的 true 一律保留，只補上缺失的鍵。
+ */
+function normalizeTheoryProgress(raw) {
+  // ⚠️ 模組與步驟清單刻意放在函式**內部**：state 物件的初始化會呼叫本函式，
+  //    而 state 在檔案中的位置早於此處。函式宣告會 hoist，`const` 不會 ——
+  //    放在外層會踩到 TDZ，整個模組載入即失敗（建置時實際發生過）。
+  const modules = ["act", "mi", "icf"];
+  const steps = ["info", "flashcards", "test"];
+  const src = (raw && typeof raw === "object" && !Array.isArray(raw)) ? raw : {};
+  const out = {};
+  for (const m of modules) {
+    const mod = (src[m] && typeof src[m] === "object") ? src[m] : {};
+    out[m] = {};
+    for (const step of steps) out[m][step] = !!mod[step];
+  }
+  return out;
+}
 
 // Web Audio API Synth Sound System
 const AudioSynth = {
@@ -246,6 +270,9 @@ function t(key) {
 }
 
 function saveTheoryProgress() {
+  // 寫出前正規化：讓 localStorage 內的殘缺值逐次自我修復，
+  // 而不是把殘缺形狀一直傳下去。
+  state.theoryProgress = normalizeTheoryProgress(state.theoryProgress);
   localStorage.setItem("rehab_theory_progress", JSON.stringify(state.theoryProgress));
 }
 
@@ -477,21 +504,46 @@ async function persistCustomCases() {
 }
 
 /** 把一場完成的面談寫入保險箱，並同步更新記憶體副本。 */
+/**
+ * 把一場完成的面談寫入保險箱。
+ *
+ * @returns {Promise<{ ok: boolean, reason: string|null }>}
+ *   ok=false 時呼叫端**必須**據實告知同工，且不得聲稱已存入 ——
+ *   PRD：「the interface must never claim a draft is saved or backed up when it is not」。
+ *   此前本函式回傳 undefined，成敗只以 alert 表達，畫面照樣寫「已存入保險箱」。
+ */
 async function persistCompletedSession(session) {
   state.historySessions.unshift(session);
+  return writeSessionToVault(session);
+}
+
+/**
+ * 純寫入 —— 不動記憶體副本。
+ * 與 persistCompletedSession 分開，是為了讓「重試寫入」不會把同一場面談
+ * 再 unshift 進 state.historySessions 一次（那會在儀表板上變成兩場）。
+ * 保險箱仍是唯一權威歸屬；這裡只是把同一筆再送一次。
+ */
+async function writeSessionToVault(session) {
   if (state.vaultMode === "localstorage-fallback") {
     try {
       localStorage.setItem("rehab_sessions_history", JSON.stringify(state.historySessions));
+      return { ok: true, reason: null };
     } catch (e) {
       console.error("[Vault] localStorage 降級寫入面談紀錄失敗（可能已超出配額）：", e);
-      alert("⚠️ 本地儲存空間已滿，本場面談紀錄未能永久保存。請到「設定 → 資料保險箱」匯出備份後再重設。");
+      return { ok: false, reason: "本機儲存空間已滿（降級模式受 5MB 配額限制）。" };
     }
-    return;
   }
-  const ok = await RehabCounselorDB.saveSession(session);
-  if (!ok) {
+
+
+  try {
+    const ok = await RehabCounselorDB.saveSession(session);
+    if (ok) return { ok: true, reason: null };
     console.error("[Vault] 面談紀錄寫入 IndexedDB 失敗：", session.id);
-    alert("⚠️ 本場面談紀錄未能寫入本地保險箱，請到「設定 → 資料保險箱」檢查儲存狀態。");
+    return { ok: false, reason: "保險箱拒絕了這次寫入（可能是儲存空間不足或資料庫異常）。" };
+  } catch (err) {
+    // 逾時／阻擋／中止會走到這裡（isVaultSignal 為真時 db.js 會上拋）。
+    console.error("[Vault] 面談紀錄寫入保險箱時發生錯誤：", err);
+    return { ok: false, reason: (err && err.message) || String(err) };
   }
 }
 
@@ -562,13 +614,13 @@ async function hydrateVault() {
   state.vaultReady = true;
 }
 
-/** 把 db.js 拋出的錯誤代碼翻成 state.vaultDegradedReason 的取值。 */
+/**
+ * 把 db.js 拋出的錯誤翻成 state.vaultDegradedReason 的取值。
+ * 委派給 db.js 的 classifyVaultError() —— 分類邏輯只有一份，
+ * 避免 probe() 與這裡各自演化後對同工說出矛盾的話。
+ */
 function vaultReasonFromError(err) {
-  if (!err || !err.code) return "error";
-  if (err.code === "VAULT_BLOCKED") return "blocked";
-  if (err.code === "VAULT_TIMEOUT") return "timeout";
-  if (err.code === "VAULT_ABORTED") return "timeout";
-  return "error";
+  return classifyVaultError(err);
 }
 
 /**
@@ -592,6 +644,11 @@ function vaultDegradedNotice() {
       return {
         title: "讀取本機儲存時發生錯誤",
         body: "<strong>你的面談紀錄應該仍在保險箱內</strong>，但這次讀取失敗。可以按「重試連線」，或到「系統設定 → 資料保險箱」匯出備份。"
+      };
+    case "version":
+      return {
+        title: "你開啟的是舊版程式",
+        body: "保險箱的格式比目前程式新，通常是瀏覽器快取了舊版本。<strong>你的面談紀錄沒有遺失。</strong>請強制重新整理（Mac 按 Cmd+Shift+R，Windows 按 Ctrl+F5）載入最新版本。"
       };
     case "unavailable":
     default:
@@ -618,11 +675,8 @@ function refreshStateFromLocalStorage() {
 
   state.userName = localStorage.getItem("rehab_user_name") || "";
   state.unlockedAchievements = readJSON("rehab_unlocked_achievements", []);
-  state.theoryProgress = readJSON("rehab_theory_progress", {
-    act: { info: false, flashcards: false, test: false },
-    mi: { info: false, flashcards: false, test: false },
-    icf: { info: false, flashcards: false, test: false }
-  });
+  // 還原備份後可能寫回殘缺形狀（舊備份含 theoryProgress: {}），故同樣正規化。
+  state.theoryProgress = normalizeTheoryProgress(readJSON("rehab_theory_progress", null));
 
   state.locale = localStorage.getItem("rehab_locale") || "zh-HK";
   state.selectedModel = localStorage.getItem("rehab_selected_model") || "gemini-2.5-flash";
@@ -702,8 +756,92 @@ async function restoreVaultBackup(file) {
 document.addEventListener("DOMContentLoaded", () => {
   initApp().catch((e) => {
     console.error("[RehabCounselor] 啟動失敗：", e);
+    // Milestone 8 補完：此前只有 console.error，畫面留在空白的內容區上
+    // ——「加載中...」的標題配一片空白，沒有錯誤、沒有出路。
+    // 那正是 PRD Degradation Honesty 禁止的狀態，只是成因是渲染例外而非
+    // 保險箱掛住（ARCHITECTURE §7 D33）。
+    renderBootFailure(e);
   });
 });
+
+/**
+ * 單一頁面渲染失敗時的錯誤卡。取代「悄悄留下上一頁內容」的舊行為。
+ * 側欄仍可用，同工可以走去其他頁面或設定頁匯出備份。
+ */
+function renderViewFailure(mount, viewName, err) {
+  if (!mount) return;
+  const message = (err && err.message) ? err.message : String(err);
+  mount.innerHTML = `
+    <div class="glass-card boot-failure-card">
+      <i class="fa-solid fa-circle-exclamation boot-failure-icon"></i>
+      <h3 class="boot-failure-title">這一頁未能顯示</h3>
+      <p class="boot-failure-body">
+        渲染「${escapeHtmlText(viewName)}」時發生錯誤。其他頁面仍可正常使用 ——
+        左側導覽沒有受影響，<strong>你的面談紀錄也不受此錯誤影響</strong>。
+      </p>
+      <pre class="boot-failure-detail">${escapeHtmlText(message)}</pre>
+      <div class="boot-failure-actions">
+        <button class="btn btn-primary" id="view-failure-reload-btn">
+          <i class="fa-solid fa-rotate"></i> 重新載入平台
+        </button>
+      </div>
+    </div>
+  `;
+  const btn = document.getElementById("view-failure-reload-btn");
+  if (btn) btn.addEventListener("click", () => window.location.reload());
+}
+
+/**
+ * 開機失敗畫面。刻意不讀 state、不依賴任何已載入資料，
+ * 只做字串拼接與 innerHTML 賦值 —— 它必須在「什麼都壞了」時仍能顯示。
+ */
+function renderBootFailure(err) {
+  const mount = document.getElementById("content-view-mount");
+  const title = document.getElementById("view-title");
+  const subtitle = document.getElementById("view-subtitle");
+  if (title) title.textContent = "平台未能完成啟動";
+  if (subtitle) subtitle.textContent = "以下是實際發生的錯誤，你的紀錄應該仍在本機保險箱內。";
+  if (!mount) return;
+
+  const message = (err && err.message) ? err.message : String(err);
+  mount.innerHTML = `
+    <div class="glass-card boot-failure-card">
+      <i class="fa-solid fa-circle-exclamation boot-failure-icon"></i>
+      <h3 class="boot-failure-title">平台未能完成啟動</h3>
+      <p class="boot-failure-body">
+        載入過程中發生錯誤，因此主畫面沒有顯示出來。
+        <strong>這通常不代表你的面談紀錄有問題</strong> —— 它們存在本機保險箱，不受此錯誤影響。
+      </p>
+      <pre class="boot-failure-detail">${escapeHtmlText(message)}</pre>
+      <div class="boot-failure-actions">
+        <button class="btn btn-primary" id="boot-failure-reload-btn">
+          <i class="fa-solid fa-rotate"></i> 重新載入
+        </button>
+        <button class="btn" id="boot-failure-settings-btn">
+          <i class="fa-solid fa-sliders"></i> 前往系統設定（可匯出備份）
+        </button>
+      </div>
+    </div>
+  `;
+
+  const reloadBtn = document.getElementById("boot-failure-reload-btn");
+  if (reloadBtn) reloadBtn.addEventListener("click", () => window.location.reload());
+  const settingsBtn = document.getElementById("boot-failure-settings-btn");
+  if (settingsBtn) settingsBtn.addEventListener("click", () => {
+    try {
+      switchView("settings", { skipUnsavedGuard: true });
+    } catch (e) {
+      console.error("[RehabCounselor] 設定頁亦無法渲染：", e);
+    }
+  });
+}
+
+/** 把文字安全放進 HTML —— 錯誤訊息可能含 < >，不得當成標記解析。 */
+function escapeHtmlText(text) {
+  const div = document.createElement("div");
+  div.textContent = String(text == null ? "" : text);
+  return div.innerHTML;
+}
 
 async function initApp() {
   // 自動將廢棄/已移除的模型 (gemini-2.0-flash, gemini-1.5-flash) 升級至預設的 gemini-2.5-flash
@@ -816,6 +954,10 @@ function clearVaultLoadingState() {
  */
 function renderVaultDegradedBanner() {
   const mount = document.getElementById("content-view-mount");
+  // D37：先移除既有橫幅再插入。switchView() 對 roleplay／icf_board 沒有
+  // 對應 case，那些 view 不會重繪 mount，於是每次語系切換都會再疊一個。
+  const existing = document.getElementById("vault-degraded-banner");
+  if (existing) existing.remove();
   if (!mount || state.vaultMode === "indexeddb") return;
 
   const notice = vaultDegradedNotice();
@@ -985,6 +1127,10 @@ function switchView(viewName, opts = {}) {
   AudioSynth.playClick();
   window.scrollTo({ top: 0, left: 0, behavior: "auto" });
 
+  // Milestone 8 補完：任一 render 函式拋錯時，此前 innerHTML 從未被賦值，
+  // 於是**標題換了、內容還是上一頁** —— 實測出現過「標題：學習分析與歷程」
+  // 配設定頁畫面，比空白更容易讓同工誤判（ARCHITECTURE §7 D33）。
+  try {
   switch(viewName) {
     case "dashboard":
       title.textContent = t("dashboard_welcome");
@@ -1016,6 +1162,10 @@ function switchView(viewName, opts = {}) {
       subtitle.textContent = state.locale === "en" ? "Configure Gemini API keys and tune Cantonese Speech parameters for optimal setup." : state.locale === "zh-CN" ? "配置 Gemini API 金钥、微调广东话语音输出，实现最佳体验。" : "配置 Gemini API 金鑰、微調廣東話語音輸出，實現最佳體驗。";
       renderSettings(mount);
       break;
+  }
+  } catch (err) {
+    console.error(`[RehabCounselor] 「${viewName}」渲染失敗：`, err);
+    renderViewFailure(mount, viewName, err);
   }
 
   // Milestone 8：降級狀態的常駐橫幅置於內容區最上方。
@@ -4778,11 +4928,15 @@ function speakWebSpeech(cleanText, bubbleEl = null, forcePlay = false) {
  * Milestone 8：「正在評估」的**非破壞性**覆蓋層。
  * 疊在面談房間之上而不取代它，失敗時移除即可完整退回。
  */
+let evaluatingOverlayPrevPosition = null;
+
 function showEvaluatingOverlay(mount) {
   hideEvaluatingOverlay();
   if (!mount) return;
   // 覆蓋層以 absolute 定位在 mount 之內，故 mount 需為定位參考點。
+  // D36：記住進入前的 inline 值，離開時原樣還原（此前永久留下 position:relative）。
   if (getComputedStyle(mount).position === "static") {
+    evaluatingOverlayPrevPosition = mount.style.position;
     mount.style.position = "relative";
   }
   const overlay = document.createElement("div");
@@ -4807,7 +4961,13 @@ function showEvaluatingOverlay(mount) {
 
 function hideEvaluatingOverlay() {
   const overlay = document.getElementById("rp-evaluating-overlay");
-  if (overlay) overlay.remove();
+  if (!overlay) return;
+  const mount = overlay.parentElement;
+  overlay.remove();
+  if (mount && evaluatingOverlayPrevPosition !== null) {
+    mount.style.position = evaluatingOverlayPrevPosition;
+    evaluatingOverlayPrevPosition = null;
+  }
 }
 
 async function endRoleplaySession() {
@@ -4868,17 +5028,28 @@ async function endRoleplaySession() {
     };
     
     // ADR-0005：寫入 IndexedDB 保險箱並同步更新記憶體副本。
-    await persistCompletedSession(completedSession);
+    const persisted = await persistCompletedSession(completedSession);
+    // 寫入失敗時記住這一筆，好讓警示卡的「重試寫入」不必重跑 AI 評估
+    // （那會再消耗一次金鑰額度，而評估其實已經成功了）。
+    pendingVaultWrite = persisted.ok ? null : completedSession;
 
-    // Milestone 8：入庫**成功之後**才標記。這是 hasUnsavedInterview() 的關鍵條件 ——
+    // 入庫**成功之後**才標記。這是 hasUnsavedInterview() 的關鍵條件 ——
     // 在此之前離開就是真的失去，之後離開則已有持久副本。
     // 只存在於記憶體，不進入 completedSession，因此不寫入任何 object store。
-    state.activeSession.vaultedAt = new Date().toISOString();
+    //
+    // ⚠️ 寫入失敗時刻意**不設** vaultedAt：那場面談確實還沒有持久副本，
+    //    守衛必須繼續保護它，讓同工有機會匯出或重試。
+    if (persisted.ok) {
+      state.activeSession.vaultedAt = new Date().toISOString();
+    }
     hideEvaluatingOverlay();
 
-    // Play physical success sound
-    AudioSynth.playSuccess();
-    
+    if (persisted.ok) {
+      AudioSynth.playSuccess();
+    } else {
+      AudioSynth.playError();
+    }
+
     // Trigger Achievements Check（條件由 evaluateAchievement() 依保險箱紀錄判定）
     const recordAfterSession = computeCounselorRecord(state.historySessions);
     checkAndUnlockAchievements("first_session");
@@ -4886,8 +5057,8 @@ async function endRoleplaySession() {
     if (recordAfterSession.distinctCaseIds.size >= 3) {
       checkAndUnlockAchievements("combat_specialist");
     }
-    
-    renderSessionReport(mount, report);
+
+    renderSessionReport(mount, report, persisted);
   } catch (error) {
     hideEvaluatingOverlay();
     AudioSynth.playError();
@@ -4898,11 +5069,94 @@ async function endRoleplaySession() {
 }
 
 /**
+ * 寫入保險箱失敗時的警示卡。
+ *
+ * PRD：「the interface must never claim a draft is saved or backed up when it is not」。
+ * 此前兩個完成畫面都寫死「已存入保險箱」，寫入失敗時那是不實陳述。
+ * 匯出在此刻是同工唯一能保住這場面談的方法，故把它講明。
+ */
+let pendingVaultWrite = null;
+
+function renderVaultWriteFailureCard(persisted) {
+  if (!persisted || persisted.ok) return "";
+  return `
+    <div class="vault-write-failure-card">
+      <h4 class="vault-write-failure-title">
+        <i class="fa-solid fa-triangle-exclamation"></i> 這場面談<strong>未能存入保險箱</strong>
+      </h4>
+      <p class="vault-write-failure-body">
+        原因：${persisted.reason || "未知錯誤"}<br>
+        評估已經完成，下方內容都是真實的，但它<strong>還沒有持久副本</strong> ——
+        關閉分頁就會失去。
+      </p>
+      <p class="vault-write-failure-body">
+        <strong>請先按下方的「匯出」把這場面談存成檔案</strong>，那是此刻最穩妥的作法。
+        評估不必重跑 —— 按「重試寫入保險箱」會直接把同一份紀錄再送一次。
+      </p>
+      <div class="vault-write-failure-actions">
+        <button class="btn btn-primary" id="vault-retry-write-btn">
+          <i class="fa-solid fa-rotate"></i> 重試寫入保險箱
+        </button>
+      </div>
+      <p class="vault-write-failure-status" id="vault-retry-write-status" hidden></p>
+    </div>
+  `;
+}
+
+/**
+ * 把「重試寫入保險箱」接上事件。渲染完警示卡的畫面都要呼叫一次。
+ * 成功後就地更新畫面：設 vaultedAt（守衛因此放行）、換掉警示卡、修正標題。
+ */
+function bindVaultRetryWrite() {
+  const btn = document.getElementById("vault-retry-write-btn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    if (!pendingVaultWrite) return;
+    AudioSynth.playClick();
+    btn.disabled = true;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 寫入中…`;
+    const status = document.getElementById("vault-retry-write-status");
+
+    const result = await writeSessionToVault(pendingVaultWrite);
+
+    if (result.ok) {
+      pendingVaultWrite = null;
+      if (state.activeSession) state.activeSession.vaultedAt = new Date().toISOString();
+      AudioSynth.playSuccess();
+      const card = document.querySelector(".vault-write-failure-card");
+      if (card) {
+        card.classList.add("vault-write-recovered");
+        card.innerHTML = `
+          <h4 class="vault-write-failure-title vault-write-recovered-title">
+            <i class="fa-solid fa-circle-check"></i> 已成功存入保險箱
+          </h4>
+          <p class="vault-write-failure-body">
+            這場面談現在有持久副本了，可在「學習分析」查閱。
+          </p>
+        `;
+      }
+      const title = document.getElementById("view-title");
+      if (title) title.textContent = title.textContent.replace("（未存入保險箱）", "");
+    } else {
+      AudioSynth.playError();
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+      if (status) {
+        status.hidden = false;
+        status.textContent = `仍然無法寫入：${result.reason || "未知錯誤"}　請先匯出保存。`;
+      }
+    }
+  });
+}
+
+/**
  * 離線示範模式完成面談後的畫面。
  * 只呈現真實存在的內容：逐字回顧與同工自己撰寫的日誌。
  * 不畫雷達、不給等第、不編臨床總結 —— 沒有 AI 就沒有 AI 評估。
  */
-function renderSessionCompletedWithoutEvaluation(container) {
+function renderSessionCompletedWithoutEvaluation(container, persisted) {
+  const vaulted = !persisted || persisted.ok;
   const title = document.getElementById("view-title");
   if (title) title.textContent = `面談已完成：${state.activeCase.name}`;
 
@@ -4914,7 +5168,7 @@ function renderSessionCompletedWithoutEvaluation(container) {
   container.innerHTML = `
     <div class="glass-card" style="max-width:820px; margin:0 auto; padding:28px; display:flex; flex-direction:column; gap:20px;">
       <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-        <h3 style="font-size:1.15rem; font-weight:800; color:var(--text-bright);">面談已完成並存入保險箱</h3>
+        <h3 style="font-size:1.15rem; font-weight:800; color:var(--text-bright);">${vaulted ? "面談已完成並存入保險箱" : "面談已完成，但未能存入保險箱"}</h3>
         <span style="font-size:0.66rem; font-weight:800; letter-spacing:0.3px; color:var(--accent-amber); background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); padding:2px 7px; border-radius:5px; white-space:nowrap;"><i class="fa-solid fa-clapperboard"></i> 離線示範</span>
       </div>
 
@@ -4922,9 +5176,13 @@ function renderSessionCompletedWithoutEvaluation(container) {
         <b style="color:var(--accent-amber);">本次沒有臨床評估。</b>
         離線示範模式沒有 AI 參與，因此沒有雷達評分，也沒有督導總結 ——
         本平台不會用預先寫好的分數與評語冒充 AI 評估。<br>
-        你剛才的逐字對話與面談日誌<b>已完整保存</b>，可在「學習分析」查閱或匯出。
+        ${vaulted
+          ? `你剛才的逐字對話與面談日誌<b>已完整保存</b>，可在「學習分析」查閱或匯出。`
+          : `你剛才的逐字對話與面談日誌就在下方，但<b>尚未寫入保險箱</b> —— 詳見下方警示。`}
         於「系統設定」配置 Gemini API 金鑰後，往後的面談即可獲得真實的五維評分與督導總結。
       </div>
+
+      ${renderVaultWriteFailureCard(persisted)}
 
       <div style="display:flex; flex-direction:column; gap:8px;">
         <h4 style="font-size:0.88rem; font-weight:800; color:var(--text-bright);"><i class="fa-solid fa-comments"></i> 逐字對話回顧</h4>
@@ -4944,6 +5202,8 @@ function renderSessionCompletedWithoutEvaluation(container) {
     </div>
   `;
 
+  bindVaultRetryWrite();
+
   const exportBtn = document.getElementById("rp-noeval-export-btn");
   if (exportBtn) exportBtn.addEventListener("click", () => { AudioSynth.playClick(); exportSessionReport(null); });
   const settingsBtn = document.getElementById("rp-noeval-settings-btn");
@@ -4956,21 +5216,25 @@ function renderSessionCompletedWithoutEvaluation(container) {
   if (backBtn) backBtn.addEventListener("click", () => { AudioSynth.playClick(); switchView("arena"); });
 }
 
-function renderSessionReport(container, report) {
+function renderSessionReport(container, report, persisted) {
   const title = document.getElementById("view-title");
 
   // 離線示範模式沒有 AI，因此沒有臨床評估。此處不畫雷達、不給等第、不編總結，
   // 只呈現真實存在的東西：逐字紀錄與同工自己寫的日誌。
   if (!hasEvaluation({ report })) {
-    renderSessionCompletedWithoutEvaluation(container);
+    renderSessionCompletedWithoutEvaluation(container, persisted);
     return;
   }
 
-  title.textContent = `輔導能力評審報告：${state.activeCase.name}`;
+  const vaulted = !persisted || persisted.ok;
+  title.textContent = vaulted
+    ? `輔導能力評審報告：${state.activeCase.name}`
+    : `輔導能力評審報告（未存入保險箱）：${state.activeCase.name}`;
 
   const { empathy, changeTalk, actFlexibility, icfAccuracy, actionPlanning } = report.scores;
 
   container.innerHTML = `
+    ${renderVaultWriteFailureCard(persisted)}
     <div class="grid-2col" style="margin-bottom: 24px;">
       
       <!-- Left: Skills radar simulation & numerical scores -->
@@ -5073,6 +5337,8 @@ function renderSessionReport(container, report) {
 
     </div>
   `;
+
+  bindVaultRetryWrite();
 
   document.getElementById("rp-report-export-btn").addEventListener("click", () => exportSessionReport(report));
 
@@ -6967,7 +7233,16 @@ function renderSettings(container) {
 
       // 2a. ADR-0005：清空 IndexedDB 保險箱。
       //     若少了這一步，重設後看似清空，但下次開機 hydrateVault() 會把舊資料整批撈回來。
-      await RehabCounselorDB.clearAll();
+      try {
+        // Milestone 8 補完：此處此前無 try —— clearAll() 拋錯即成為未處理的
+        // rejection，重設半途中止而畫面毫無提示，同工不知道有沒有成功。
+        await RehabCounselorDB.clearAll();
+      } catch (err) {
+        console.error("[Vault] 清空保險箱失敗：", err);
+        AudioSynth.playError();
+        alert(`⚠️ 重設未能完成：${(err && err.message) || err}\n\n保險箱內的資料可能仍在。請重新整理後再試一次，或先到「系統設定 → 資料保險箱」匯出備份。`);
+        return;
+      }
       state.historySessions = [];
 
       // 2b. Clear LocalStorage variables
