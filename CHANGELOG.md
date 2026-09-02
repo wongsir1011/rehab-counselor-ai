@@ -4,6 +4,47 @@
 
 ---
 
+## [v20260902_v28_m9fix] - 2026-09-02 11:38 (香港時間 UTC+8)
+
+## 🩹 Milestone 9 同儕審查修正 —— 匯入吃掉劇本，以及七處 escape 遺漏
+
+時間來源：本機系統時鐘，原始值 `Wed Sep  2 03:38:21 UTC 2026`（`date -u`），系統時區 `Asia/Hong_Kong`，換算 **2026-09-02 11:38 HKT**。
+
+### 🐛 匯入白名單把個案的離線劇本整段吃掉
+`sanitizeImportedCase()` 處理 `roleplay_flow` 時只找 `x.text`，但真實形狀是 `{ user, ai_reply, coach_hint }` —— **沒有 `text` 欄位**。撰寫計劃時盤點了個案的頂層欄位，卻沒有讀這個陣列的內部結構，於是每一項都被判為無效並丟棄。
+
+實測完整使用者路徑：同工 A 分享阿強的基因碼 → 同工 B 匯入，顯示「🎉 成功導入個案：阿強」→ 保險箱內 `roleplay_flow: []` → B 在離線模式點進去，看到「此個案未附示範劇本…無法在此模式下與他對話」。**3 回合劇本被匯入流程吃掉，而訊息說成功。**
+
+修法：依真實形狀逐欄位清理；`ai_reply` 與 `coach_hint` 皆須為非空字串該回合才算有效（缺督導提示會讓面板空白而不說明原因，違反 PRD「hint visible by default on arrival」）；`user` 欄位程式碼雖未讀取，但屬教材內容，原樣保留。匯入提示改為據實告知丟棄的回合數 —— 原本只數頂層鍵，劇本被丟時 `roleplay_flow` 仍以空陣列存在，同工看不到任何線索。
+
+### 🛡️ 追查時牽出的七處 escape 遺漏
+修好上一項後重跑安全掃蕩，**離線完成畫面觸發了 XSS**。根因：`historyText` 這個變數名在檔案中出現兩次，用途完全不同 —— 一個進 `<pre>` 的 `innerHTML`，一個組 Markdown 匯出。我 grep 時看到 `.map(h => …)` 就認定是匯出，**建置與審查時各誤判一次**。
+
+改用「先枚舉 `innerHTML` 模板、再看模板內未 escape 的資料插入」（而非依欄位名 grep），找出七處：
+
+*   `app.js:5326`／`5331` — 離線完成畫面的逐字回顧與面談日誌
+*   `app.js:5466` — 報告頁的日誌備份
+*   `app.js:6915` — 詳情彈窗的 SOAP 分頁
+*   `app.js:1608` — 隨機盲盒的 `randomCase.name`，來自 `state.cases`，**包含匯入的個案**
+*   **`app.js:5649` — ICF 拖放因子**：Milestone 9 escape 了寫進 `data-text` 屬性的那一側，卻漏了 `getAttribute("data-text")` 讀回來又進 `innerHTML` 的那一側 —— 拖放時攻擊仍然成立。**只做一半的 escape 等於沒做。**
+*   `app.js:7137` — 瀏覽器語音名稱，系統提供而非同工輸入，低風險，一致處理
+
+同一輪掃描確認 18 處 `state.theoryProgress.*` 是布林轉 CSS 變數名（非資料插入），`opt.text`／`ach.name`／`node.name` 來自 `mockData.js`（教材，受信任且可能刻意含格式），皆不需處理。
+
+同工自己輸入的筆記也納入 escape 範圍 —— 貼進標記不應被當成 HTML 解析。
+
+### ✅ 驗證
+七個內建個案的劇本逐一比對，全部完整保留且逐字相符；走完整 UI 路徑匯入阿強 → 3 回合完整 → **離線可對話**，劇本標示與督導提示正確；故意弄壞兩個回合 → 提示明說「2 個回合格式不完整…保留 1 個回合」。以植入保險箱的惡意個案走遍儀表板盲盒、個案大廳、ICF 沙盒（含**實際拖放**）、面談室、劇本回合、完成畫面、歷史卡片、詳情彈窗 SOAP 分頁 —— `window.__XSS` 全程 **0**。正常路徑回歸：面談、報告頁雷達、筆記顯示、AI 總結換行仍生效、保險箱 1 筆、用量計 2 次。Markdown 匯出無 `&lt;`／`&amp;`／`&quot;`。乾淨載入主控台零輸出。
+
+### 📦 變更檔案
+*   [app.js](app.js)：`sanitizeImportedCase()` 的 `roleplay_flow` 依真實形狀清理；匯入提示據實告知；七處 escape 補齊。
+*   [index.html](index.html)：`app.js` 戳記改為 `v20260902_v28_m9fix`；**`index.css` 本輪未改動，戳記維持 `v20260831_v27_m9`**。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)、[Product_Roadmap.md](Product_Roadmap.md)、[plan/09-trustworthy-local-record.md](plan/09-trustworthy-local-record.md)。
+
+**未更動**：`PRD.md`、`CLAUDE.md`、`mockData.js`、`geminiService.js`、`src/utils/db.js`、`index.css`、`DECISIONS.md`、`adr/`。
+
+---
+
 ## [v20260831_v27_m9] - 2026-09-02 10:24 (香港時間 UTC+8)
 
 ## 🔐 Milestone 9「可信賴的本地紀錄」

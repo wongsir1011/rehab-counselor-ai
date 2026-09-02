@@ -1,7 +1,7 @@
 # Architecture: RehabCounselor AI
 
 > **Status**: Living Architecture Document (SSOT for Code Structure & Technical Design)  
-> **Last Reconciled**: 2026-09-02 10:24 HKT (UTC+8) — Milestone 9 完成；see §7 for drift found and closed
+> **Last Reconciled**: 2026-09-02 11:38 HKT (UTC+8) — Milestone 9 完成並經同儕審查修正；see §7 for drift found and closed
 
 ---
 
@@ -298,6 +298,24 @@ Two defences, both necessary: `escHtml()` at render (which also protects malicio
 **C1 (from the 2026-08-31 peer review) is closed by the same milestone.** `persistCompletedSession()` now writes first and only adds to `state.historySessions` on success. Because dashboard figures, analytics aggregates, radar and **badge predicates** all read that array through `computeCounselorRecord()`, one ordering change fixed all of them at once — verified: a failed write now leaves badges `[]` where it previously granted `first_session` and `empathy_master` against an empty vault.
 
 **Deliberately not fixed**: the daily-cap input does not follow the light theme. Measured against its neighbour — the Gemini key field behaves identically in both themes (`.form-group input` wins on specificity and is dark-on-light in both). Making this one input light would make it inconsistent with the field beside it. The rule was removed and the reason recorded in `index.css`; the settings page's light theme belongs to the §8 design-system work.
+
+### Findings from the Milestone 9 peer review (2026-09-02 11:38 HKT) — all fixed in the same round
+
+**The import allow-list ate the offline script.** `sanitizeImportedCase()` looked for `x.text` on each `roleplay_flow` entry, but the real shape is `{ user, ai_reply, coach_hint }` — no `text` field at all. Every entry was judged invalid and dropped. Measured on the full user path: sharing 阿強's gene code, importing it (「🎉 成功導入」), then opening it offline produced 「此個案未附示範劇本，無法對話」 — a 3-turn script destroyed by the import itself, with a success message. Fixed by cleaning the real fields; an entry needs both `ai_reply` and `coach_hint` to count, because a turn without a hint leaves the supervisor panel blank with no explanation. The import notice now reports dropped turns — counting only top-level keys hid this, since `roleplay_flow` still existed as an empty array.
+
+**Then four escape gaps surfaced while re-running the security sweep.** `completion: 1` — the offline completion screen fired. Root cause: `historyText` is the name of **two different variables** — one feeds a `<pre>` via `innerHTML` (`app.js:5300→5326`), the other builds the Markdown export (`app.js:7893→7929`). Grepping for `.map(h => …)` and seeing an export-shaped string, I classified it as export **twice** — once while building, once while reviewing.
+
+Re-scanning by a different method — enumerate `innerHTML` templates first, then look for un-escaped data inside them, rather than grepping by field name — found four (offline completion transcript and notes, report-page notes backup, detail-popup SOAP tab) and then three more:
+
+| Location | Why it mattered |
+| :--- | :--- |
+| `app.js:1608` | The mystery-box picks from `state.cases`, which **includes imported cases** |
+| `app.js:5649` | **The write side of `data-text` was escaped in M9; the read-back side was not.** `getAttribute("data-text")` returns the original string and went straight into `innerHTML` — the attack still fired on drag-and-drop. Half an escape is no escape. |
+| `app.js:7137` | Browser voice names — system-supplied rather than counselor input, low risk, handled for consistency |
+
+The same scan confirmed 18 `state.theoryProgress.*` insertions are booleans mapped to CSS variable names (not data), and that `opt.text` / `ach.name` / `node.name` come from `mockData.js` — teaching material, trusted and possibly intentionally formatted.
+
+Verified after fixing: a malicious case planted **in the vault** walked through the mystery box, case lobby, ICF sandbox (with an actual drag-and-drop), interview room, a scripted turn, the completion screen, history cards and the detail popup's SOAP tab — `window.__XSS` stayed **0** throughout. Counselor-typed markup in the notes field also renders as text. Markdown export still contains no `&lt;`/`&amp;`/`&quot;`.
 
 ### Confirmed sound
 

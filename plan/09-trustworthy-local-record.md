@@ -1,6 +1,6 @@
 # Milestone 9 Plan: 可信賴的本地紀錄
 
-* **Status**: Completed ✅ —— 建置與驗證完成 2026-09-02 10:24 HKT
+* **Status**: Completed ✅ —— 建置 2026-09-02 10:24 HKT，同儕審查修正 11:38 HKT
 * **Approved**: 2026-08-31 (HKT, UTC+8)
 * **Roadmap Ref**: [Product Roadmap Milestone 9](../Product_Roadmap.md)
 * **Traces to PRD v4**: `HARD CONSTRAINTS → SSOT`；`HARD CONSTRAINTS → Security & Secrets`；`HARD CONSTRAINTS → Usage Guardrail`
@@ -329,3 +329,60 @@ function escHtml(v) {
 
 ### 未執行
 真實 Gemini 金鑰端對端；MiniMax TTS 的成功路徑（僅驗證 2049 失敗分支的日誌內容）；連續 STT；ICF 沙盒的完整拖放評分流程（只驗證屬性值與 `dataset` 讀回）；理論 Hub 閃卡與 ACT／ICF 自測；AI 個案合成的完整流程（`generateCustomCase` 只驗證計數）；SOAP 助手抽屜；Phase 13 督導干預注入；用量面板在**真實跨日**的重置（以偽造 `date` 驗證）。
+
+
+---
+
+## 9. 同儕審查修正（2026-09-02 11:38 HKT）
+
+審查發現一項 CRITICAL 並在追查時牽出四項同源遺漏。全部已修並實測。
+
+### 9.1 匯入白名單吃掉個案的離線劇本（審查的 C1）
+
+`sanitizeImportedCase()` 處理 `roleplay_flow` 時只找 `x.text`，但真實形狀是 `{ user, ai_reply, coach_hint }` —— **沒有 `text` 欄位**。撰寫計劃時我盤點了個案的頂層欄位，卻沒有讀這個陣列的內部結構。
+
+後果（實測完整使用者路徑）：分享阿強的基因碼 → 匯入顯示「🎉 成功導入」→ 保險箱內 `roleplay_flow: []` → 離線點進去顯示「此個案未附示範劇本，無法對話」。**3 回合劇本被匯入流程吃掉，而訊息說成功。**
+
+修法：依真實形狀逐欄位清理。`ai_reply` 與 `coach_hint` 皆須為非空字串該回合才算有效 —— 缺督導提示會讓面板空白而不說明原因，違反 PRD「hint visible by default on arrival」。`user` 欄位程式碼目前未讀取，但屬教材內容，原樣保留而非悄悄丟棄。
+
+匯入提示同時改為據實告知：原本 `droppedCount` 只數頂層鍵，劇本被丟時 `roleplay_flow` 仍以空陣列存在，同工看不到任何線索。
+
+**驗證**：七個內建個案的劇本逐一比對，`_ALL_PRESERVED: true`，形狀與內容逐字相符；走完整 UI 路徑匯入阿強 → 劇本 3 回合完整 → 離線可對話，劇本標示與督導提示正確；故意弄壞兩個回合（一缺 `coach_hint`、一缺 `ai_reply`）→ 提示明說「2 個回合格式不完整…保留 1 個回合」。
+
+### 9.2 追查時牽出的四項 escape 遺漏
+
+修 C1 後重跑安全掃蕩，`completion: 1` —— **離線完成畫面觸發了 XSS**。根因是我在建置與審查時**兩次**把同一處判成「匯出純文字」：
+
+`historyText` 這個變數名在檔案中出現兩次，用途完全不同 —— `app.js:5300` 組出的進 `<pre>` 的 `innerHTML`，`app.js:7893` 組出的進 Markdown 匯出。我 grep 時看到 `.map(h => ...)` 就認定是匯出，沒有追它的去向。
+
+改用「先找 innerHTML 模板、再看模板內未 escape 的資料插入」的掃法（而非依欄位名 grep），找出四處：
+
+| 位置 | 內容 | 為何漏掉 |
+| :--- | :--- | :--- |
+| `app.js:5326` | 離線完成畫面的逐字回顧 | 中介變數 `historyText`，與匯出同名 |
+| `app.js:5331` | 同畫面的面談日誌 | 同工自己的輸入，先前未列為「不受信任」 |
+| `app.js:5466` | 報告頁的日誌備份 | 同上 |
+| `app.js:6915` | 詳情彈窗的 SOAP 分頁 | 同上 |
+
+再以「掃 innerHTML 模板內所有含資料欄位的插入」複查，又找出三處：
+
+| 位置 | 內容 | 判定 |
+| :--- | :--- | :--- |
+| `app.js:1608` | 隨機盲盒的 `randomCase.name` | 來自 `state.cases`，**包含匯入的個案** —— 必須修 |
+| `app.js:5649` | ICF 拖放因子讀回的 `data-text` | **寫入側已 escape、讀回側漏了** —— 拖放時攻擊仍成立 |
+| `app.js:7137` | 瀏覽器語音名稱 `v.name` | 系統提供而非同工輸入，低風險，一致處理 |
+
+`app.js:5649` 最值得記：Milestone 9 escape 了寫進 `data-text` 屬性的那一側，卻沒有處理 `getAttribute("data-text")` 讀回來又插進 `innerHTML` 的那一側。**只做一半的 escape 等於沒做。**
+
+同一輪掃描確認 18 處 `state.theoryProgress.*` 是布林轉 CSS 變數名（非資料插入）、`opt.text`／`ach.name`／`node.name` 等來自 `mockData.js`（教材，受信任且可能刻意含格式），皆不需處理。
+
+**驗證**：以含 `<img onerror>` 的惡意個案（植入保險箱）走遍儀表板盲盒、個案大廳、ICF 沙盒（含**實際拖放**）、面談室、劇本回合、完成畫面、歷史卡片、詳情彈窗 SOAP 分頁 —— `window.__XSS` 全程 **0**。另測同工在筆記中貼入標記，同樣以文字顯示。
+
+### 9.3 回歸與未受影響
+
+正常路徑完整重跑：面談 3 氣泡、督導提示、報告頁雷達、筆記正常顯示、AI 總結的 `<br>` 換行仍生效、保險箱 1 筆、用量正確計 2 次。Markdown 匯出實測**無** `&lt;`／`&amp;`／`&quot;`，筆記原樣保留。乾淨載入主控台零輸出。
+
+`index.css` 本輪未改動，戳記維持 `v20260831_v27_m9`；`app.js` 改為 `v20260902_v28_m9fix`。
+
+### 9.4 本次仍未測試
+真實 Gemini 金鑰端對端；MiniMax TTS 成功路徑；連續 STT；ICF 沙盒的完整評分結算；理論 Hub 閃卡與自測；MI 闖關；小組研討完整答題；AI 個案合成完整流程；SOAP 助手抽屜；Phase 13 干預注入；真實跨日的用量重置。

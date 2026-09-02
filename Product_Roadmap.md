@@ -152,6 +152,8 @@ After completing a counseling session, counselors receive a 5-dimension clinical
 
 **未處理**：每日上限輸入框不跟隨淺色主題。量測確認旁邊的 Gemini 金鑰輸入框行為完全相同（`.form-group input` 特異度較高，兩主題皆深底白字），單獨改這一個反而不一致。屬 `ARCHITECTURE.md` §8 的設計系統工作。
 
+**同儕審查修正（2026-09-02 11:38 HKT）**：審查發現匯入白名單把 `roleplay_flow` 判錯形狀（真實形狀是 `{user, ai_reply, coach_hint}`，程式碼卻找 `x.text`），導致**匯入附劇本的個案時劇本被整段吃掉**，而訊息顯示「成功導入」—— 同工在離線模式下永遠無法與該個案對話。追查時再牽出七處 escape 遺漏，其中最值得記的是 ICF 因子：M9 escape 了寫進 `data-text` 屬性的那一側，卻漏了 `getAttribute` 讀回來再進 `innerHTML` 的那一側 —— **只做一半的 escape 等於沒做**。全部已修並實測（惡意個案走遍八個渲染位置，`window.__XSS` 全程 0）。詳見 `plan/09` §9 與 `ARCHITECTURE.md` §7。
+
 ---
 
 ### 編排說明

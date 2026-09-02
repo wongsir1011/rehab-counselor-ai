@@ -135,11 +135,27 @@ function sanitizeImportedCase(raw) {
       .filter(x => x.text);
   }
 
-  // roleplay_flow：離線示範劇本，每項是字串或帶 text 的物件。
+  // roleplay_flow：離線示範劇本。每一項的真實形狀是
+  // { user, ai_reply, coach_hint } —— 三個都是字串，不是 { text }。
+  //
+  // ⚠️ 這裡曾經寫成「字串或帶 text 的物件」，結果把每一項都判成無效並整段丟棄：
+  //    同工匯入一個附劇本的個案後，離線模式會說「此個案未附示範劇本」，
+  //    而劇本其實是被匯入流程吃掉的。修正時實測過阿強的 3 回合劇本。
+  //
+  // 有效性：ai_reply 是離線播放的內容、coach_hint 是同一回合的督導分析，
+  // 兩者缺一該回合就播不完整（PRD 要求督導提示「visible by default on arrival」，
+  // 一個沒有提示的回合會讓面板空白而不說明原因），故兩者皆須為非空字串。
+  // user 欄位目前程式碼未讀取，但它是教材內容的一部分，原樣保留而不悄悄丟棄。
   if (Array.isArray(raw.roleplay_flow)) {
     out.roleplay_flow = raw.roleplay_flow
-      .map(x => (typeof x === "string" ? x : (x && typeof x.text === "string" ? x.text : null)))
-      .filter(Boolean);
+      .filter(x => x && typeof x === "object"
+                && typeof x.ai_reply === "string" && x.ai_reply.trim()
+                && typeof x.coach_hint === "string" && x.coach_hint.trim())
+      .map(x => ({
+        user: typeof x.user === "string" ? x.user : "",
+        ai_reply: x.ai_reply,
+        coach_hint: x.coach_hint
+      }));
   }
 
   // 轉回一般物件，避免 null 原型在既有程式碼中造成意外。
@@ -1589,7 +1605,7 @@ function renderDashboard(container) {
       
       setTimeout(() => {
         mysteryVisual.innerHTML = randomCase.avatar;
-        mysteryTitle.innerHTML = `${randomCase.name} <span class="tag tag-rose" style="font-size:0.65rem; padding:1px 5px; margin-left:4px; font-weight:700;">${randomMod.name}</span>`;
+        mysteryTitle.innerHTML = `${escHtml(randomCase.name)} <span class="tag tag-rose" style="font-size:0.65rem; padding:1px 5px; margin-left:4px; font-weight:700;">${randomMod.name}</span>`;
         mysterySubtitle.innerHTML = `<span style="color:var(--accent-cyan); font-weight:700; font-size:0.72rem; animation: pulse-glow 1s infinite alternate;">正在合成情境，1.2秒後開啟輔導...</span>`;
         
         // 核心安全修復：將轉場定時器 ID 保存，允許 switchView 主動清除以阻止導航劫持
@@ -3687,9 +3703,26 @@ function renderCaseGenerator(container) {
       await persistCustomCases();
       
       checkAndUnlockAchievements("case_creator");
-      const droppedCount = Object.keys(raw).filter(k => !(k in decodedData)).length;
+      // 據實告知白名單丟棄了什麼。只數頂層欄位不夠 —— 劇本回合被丟時
+      // roleplay_flow 仍以空陣列存在，同工會以為個案完整匯入，
+      // 直到離線點進去才發現「此個案未附示範劇本」。
+      const notes = [];
+      const droppedFields = Object.keys(raw).filter(k => !(k in decodedData));
+      if (droppedFields.length > 0) {
+        notes.push(`${droppedFields.length} 個未知欄位未被採用（僅匯入本平台已知的個案欄位）。`);
+      }
+      const rawFlowCount = Array.isArray(raw.roleplay_flow) ? raw.roleplay_flow.length : 0;
+      const keptFlowCount = (decodedData.roleplay_flow || []).length;
+      if (rawFlowCount > keptFlowCount) {
+        notes.push(
+          `示範劇本有 ${rawFlowCount - keptFlowCount} 個回合格式不完整（需同時具備案主回應與督導提示），已略過；` +
+          (keptFlowCount > 0
+            ? `保留 ${keptFlowCount} 個回合。`
+            : `此個案因此在離線模式下無法對話，需要 API 金鑰。`)
+        );
+      }
       alert(`🎉 成功導入個案：${decodedData.name} (${decodedData.health_condition})！已存入大廳。`
-        + (droppedCount > 0 ? `\n\n（基因碼中有 ${droppedCount} 個未知欄位未被採用，僅匯入本平台已知的個案欄位。）` : ""));
+        + (notes.length > 0 ? `\n\n⚠️ ${notes.join("\n")}` : ""));
       
       const catalogBtn = document.getElementById("view-cases-catalog-btn");
       if (catalogBtn) catalogBtn.click();
@@ -5290,12 +5323,12 @@ function renderSessionCompletedWithoutEvaluation(container, persisted) {
 
       <div style="display:flex; flex-direction:column; gap:8px;">
         <h4 style="font-size:0.88rem; font-weight:800; color:var(--text-bright);"><i class="fa-solid fa-comments"></i> 逐字對話回顧</h4>
-        <pre style="font-family:inherit; font-size:0.8rem; color:var(--text-main); white-space:pre-wrap; line-height:1.7; background:var(--nested-bg-medium); padding:14px; border-radius:8px; max-height:280px; overflow-y:auto;">${historyText}</pre>
+        <pre style="font-family:inherit; font-size:0.8rem; color:var(--text-main); white-space:pre-wrap; line-height:1.7; background:var(--nested-bg-medium); padding:14px; border-radius:8px; max-height:280px; overflow-y:auto;">${escHtml(historyText)}</pre>
       </div>
 
       <div style="display:flex; flex-direction:column; gap:8px;">
         <h4 style="font-size:0.88rem; font-weight:800; color:var(--text-bright);"><i class="fa-solid fa-pen-nib"></i> 面談日誌記錄</h4>
-        <pre style="font-family:inherit; font-size:0.8rem; color:var(--text-main); white-space:pre-wrap; line-height:1.7; background:var(--nested-bg-medium); padding:14px; border-radius:8px; max-height:220px; overflow-y:auto;">${notes.soap || notes.icf || "（本次面談未撰寫日誌記錄）"}</pre>
+        <pre style="font-family:inherit; font-size:0.8rem; color:var(--text-main); white-space:pre-wrap; line-height:1.7; background:var(--nested-bg-medium); padding:14px; border-radius:8px; max-height:220px; overflow-y:auto;">${escHtml(notes.soap || notes.icf || "（本次面談未撰寫日誌記錄）")}</pre>
       </div>
 
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
@@ -5430,7 +5463,7 @@ function renderSessionReport(container, report, persisted) {
         <!-- Dynamic Notes Displayed -->
         <div style="background:rgba(255,255,255,0.01); border:1px solid var(--card-border); border-radius:8px; padding:12px;">
           <h4 style="font-size:0.85rem; font-weight:700; color:var(--text-bright); margin-bottom:6px;"><i class="fa-solid fa-pen-nib"></i> 面談日誌記錄備份：</h4>
-          <pre style="font-family:inherit; font-size:0.75rem; color:var(--text-muted); white-space:pre-wrap; max-height:100px; overflow-y:auto;">${state.activeSession.notes.soap || state.activeSession.notes.icf || "（同工本次面談未有撰寫日誌記錄）"}</pre>
+          <pre style="font-family:inherit; font-size:0.75rem; color:var(--text-muted); white-space:pre-wrap; max-height:100px; overflow-y:auto;">${escHtml(state.activeSession.notes.soap || state.activeSession.notes.icf || "（同工本次面談未有撰寫日誌記錄）")}</pre>
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:auto;">
@@ -5604,7 +5637,7 @@ function initICFDragAndDrop() {
 
 function moveFactorToZone(factorEl, zoneEl) {
   const mountPoint = zoneEl.querySelector(".zone-mount-point");
-  const text = factorEl.getAttribute("data-text");
+  const text = factorEl.getAttribute("data-text");   // 個案資料 —— 下方進 innerHTML 前必須 escape
   const targetType = zoneEl.getAttribute("data-zone");
   const correctType = factorEl.getAttribute("data-type");
 
@@ -5613,7 +5646,7 @@ function moveFactorToZone(factorEl, zoneEl) {
   tag.setAttribute("data-correct", correctType);
   tag.setAttribute("data-placed", targetType);
   tag.innerHTML = `
-    <span>${text}</span>
+    <span>${escHtml(text)}</span>
     <span class="remove-btn" title="移回特徵池"><i class="fa-solid fa-xmark"></i></span>
   `;
 
@@ -6879,7 +6912,7 @@ function showSessionDetailPopup(session) {
             <h4 style="font-size:0.88rem; font-weight:700; color:var(--text-bright); margin-bottom:8px;">
               <i class="fa-solid fa-pen-to-square"></i> ${state.locale === "en" ? "Session Log Backups" : "面談日誌備份"}
             </h4>
-            <pre style="font-family:inherit; font-size:0.85rem; color:var(--text-main); white-space:pre-wrap; line-height:1.6;">${session.notes.soap || session.notes.icf || (state.locale === "en" ? "No notes recorded for this session." : "本次面談未撰寫任何日誌記錄。")}</pre>
+            <pre style="font-family:inherit; font-size:0.85rem; color:var(--text-main); white-space:pre-wrap; line-height:1.6;">${escHtml(session.notes.soap || session.notes.icf || (state.locale === "en" ? "No notes recorded for this session." : "本次面談未撰寫任何日誌記錄。"))}</pre>
           </div>
         </div>
 
@@ -7101,7 +7134,7 @@ function renderSettings(container) {
           <select id="set-voice">
             <option value="">預設系統廣東話聲音 (Auto HK Voice)</option>
             ${state.voices.filter(v => v.lang === "zh-HK" || v.lang === "zh-Hant-HK" || v.name.toLowerCase().includes("hong kong")).map(v => `
-              <option value="${v.name}" ${state.selectedVoiceName === v.name ? 'selected' : ''}>${v.name} (${v.lang})</option>
+              <option value="${escHtml(v.name)}" ${state.selectedVoiceName === v.name ? 'selected' : ''}>${escHtml(v.name)} (${escHtml(v.lang)})</option>
             `).join("")}
           </select>
           <p style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">
