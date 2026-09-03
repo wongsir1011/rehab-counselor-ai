@@ -4,6 +4,56 @@
 
 ---
 
+## [docs-m9-adr] - 2026-09-03 09:53 (香港時間 UTC+8)
+
+## 📐 補寫 Milestone 9 的三份 ADR，並重數表現層量測值
+
+**本次不含任何程式碼變更。** 這是一次留檔補完：Milestone 9 的兩輪提交（`7f03baa`、`787c4e7`）完全沒有動 `adr/` 或 `DECISIONS.md`，而該里程碑做了三個帶有明確被否決方案的重大決策。
+
+時間來源：本機系統時鐘，原始值 `Thu Sep  3 01:53:50 UTC 2026`（`date -u`），系統時區 `Asia/Hong_Kong`，`date` 與 `date -u` 相差正好 8 小時，換算為 **2026-09-03 09:53 HKT**。本專案為 local-first 無後端，無伺服器時間可用。
+
+### 📝 三份補寫的 ADR
+
+*   **[ADR-0009: The Interface Only Admits Persisted Records](adr/0009-interface-only-admits-persisted-records.md)**
+    「先寫入保險箱，成功才收進記憶體」。記錄五個被否決方案，包括「保留原順序但失敗時回滾」（回滾會 fail open，忘了回滾就留下幻影紀錄）與「在各顯示點過濾幻影紀錄」（那是 ADR-0008 §4 已否決的 per-site guard 模式）。特別記下為何不能接受「重載即自我修正」：數字會自我修正，**徽章不會** —— 一個依據不存在紀錄發出的持久徽章，正是 Milestone 7 要消滅的東西。
+
+*   **[ADR-0010: Two-Layer Defence for Untrusted Content](adr/0010-two-layer-defence-for-untrusted-content.md)**
+    渲染層 escape 與匯入白名單**兩者都做**，並記錄兩者不可互相取代的不對稱理由：白名單救不了修正前已存進保險箱的惡意個案，而只做 escape 會讓未知欄位永久留在保險箱等待日後新增的渲染點。六個被否決方案含「標記化模板」（會 escape 掉 94 處 innerHTML 中刻意插入的 HTML）與「在資料入口 escape」（會污染資料，匯出給督導時變成 `&lt;b&gt;`）。
+    **並記下代價兩輪的教訓**：依欄位名 grep 找不到中介變數 —— `historyText` 是兩個不同用途的同名變數，一個進 `innerHTML`、一個組 Markdown 匯出，我因此誤判兩次。可靠的方法是反過來：**先枚舉 `innerHTML` 模板，再看模板內未 escape 的資料插入**。以及「只做一半的 escape 等於沒做」—— `data-text` 的寫入側 escape 了，讀回側沒有，攻擊在拖放時仍然成立。
+
+*   **[ADR-0011: Daily Model-Call Cap and Its Accounting](adr/0011-daily-model-call-cap-accounting.md)**
+    計數放在唯一網路出口、以邏輯呼叫為單位、在請求**之前**遞增、上限可調。七個被否決方案含「成功後才遞增」（低估同工的實際帳單 —— 在別人的信用卡上多報比少報誠實）與「達上限時封鎖進入面談室」（會連帶封鎖已完成工作的逐字紀錄與匯出）。同時記錄兩項已知界線：用量是 per-browser-profile 而非 per-person（PRD 的存取模型沒有帳號可掛），以及 MiniMax TTS 不計入此數（該條款說的是 model calls，若 TTS 要有預算，應另立計數與措辭）。
+
+### 📊 ARCHITECTURE §8 表現層量測重數
+
+原數字量測於 2026-08-29，此後歷經三個里程碑。重數並**補上量測方法**，讓日後的數字可以比對而非重新發明：
+
+| 項目 | 2026-08-29 | 2026-09-03 |
+| :--- | :--- | :--- |
+| 行內 `style="` | 806 | **801** |
+| `class="` | 672 | **739** |
+| `index.css` 類別規則開頭 | 366 | **416** |
+| `[data-theme="light"]` 覆寫 | 42 | **44** |
+| 行內 `var(--…)` 引用 | 566 | **707** |
+| `font-size` 宣告 | 418 | **447** |
+| 相異字級 | 45 | **71** |
+| 0.70–0.85rem 區間 | 219 | **190** |
+| 間距／圓角相異值 | 20／11 | 20／11（不變） |
+
+值得記下的一組矛盾：相異字級**增加**（45→71），而擁擠的 0.70–0.85rem 區間**減少**（219→190）。兩者同因 —— M7–M9 的新元件寫成 CSS 類別並自帶字級，而非塞進既有區間的行內樣式。對可維護性是對的方向，對尺度是錯的方向，正好印證 §8 自己的論點：修這件事需要一次設計系統整理，不是下一個里程碑的善意。
+
+### 🔄 §7 D21 補記進展
+Milestone 9 的 ADR-0009 讓徽章推導的**輸入**變得可信（`state.historySessions` 只含真正寫入保險箱的紀錄，寫入失敗不再據以發徽章），但**儲存位置**仍在 `localStorage`。完整由保險箱推導仍待逐題練習紀錄（D26）。
+
+### 📦 變更檔案
+*   [DECISIONS.md](DECISIONS.md)、[adr/0009](adr/0009-interface-only-admits-persisted-records.md)、[adr/0010](adr/0010-two-layer-defence-for-untrusted-content.md)、[adr/0011](adr/0011-daily-model-call-cap-accounting.md)：新增三份 ADR 與索引。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§7 D21 補記；§8 量測值重數並新增量測方法區塊。
+*   本檔：新增本條目。
+
+**未更動**：`PRD.md`（實作未偏離產品意圖，無偏差需記）、`CLAUDE.md`、`Product_Roadmap.md`（M9 狀態已於上一輪更新為 Completed，本輪無範圍或順序變更）、`plan/`、所有程式碼檔案。
+
+---
+
 ## [v20260902_v28_m9fix] - 2026-09-02 11:38 (香港時間 UTC+8)
 
 ## 🩹 Milestone 9 同儕審查修正 —— 匯入吃掉劇本，以及七處 escape 遺漏
