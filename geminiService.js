@@ -7,10 +7,91 @@ export const GEMINI_MODELS = {
 };
 
 
+/* ==========================================================================
+   Milestone 9 / PRD「Usage Guardrail」：每日模型呼叫上限
+   ==========================================================================
+   同工用的是自己的金鑰、付自己的錢。這裡的目的不是省成本，而是讓他心裡有數 ——
+   不要在面談進行到一半才發現額度用完。
+
+   計數放在 callGeminiAPI() 這個**唯一的網路出口**：五個匯出函式全部經過它，
+   因此不會有任何一條呼叫路徑漏算，也不需要在五個呼叫端各加一次。
+   ========================================================================== */
+
+const USAGE_KEY = "rehab_daily_usage";
+const CAP_KEY = "rehab_daily_call_cap";
+export const DEFAULT_DAILY_CAP = 200;
+export const MIN_DAILY_CAP = 10;
+export const MAX_DAILY_CAP = 2000;
+
+/** 當地日期字串，作為「今天」的判定依據。 */
+function todayStamp() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** 讀取今日用量。日期不符即視為新的一天並歸零。 */
+function readUsage() {
+  const today = todayStamp();
+  try {
+    const raw = JSON.parse(localStorage.getItem(USAGE_KEY) || "null");
+    if (raw && raw.date === today && Number.isFinite(raw.count)) {
+      return { date: today, count: Math.max(0, raw.count) };
+    }
+  } catch (e) { /* 壞掉的值視同新的一天 */ }
+  return { date: today, count: 0 };
+}
+
+export function getDailyCap() {
+  const raw = parseInt(localStorage.getItem(CAP_KEY), 10);
+  if (!Number.isFinite(raw)) return DEFAULT_DAILY_CAP;
+  return Math.min(MAX_DAILY_CAP, Math.max(MIN_DAILY_CAP, raw));
+}
+
+/** @returns {number} 實際採用的上限（已夾在合法範圍內） */
+export function setDailyCap(value) {
+  const n = Math.min(MAX_DAILY_CAP, Math.max(MIN_DAILY_CAP, parseInt(value, 10) || DEFAULT_DAILY_CAP));
+  try { localStorage.setItem(CAP_KEY, String(n)); } catch (e) {}
+  return n;
+}
+
+/** 供設定頁顯示：今日已用、上限、尚餘。 */
+export function getDailyUsage() {
+  const { count } = readUsage();
+  const cap = getDailyCap();
+  return { used: count, cap, remaining: Math.max(0, cap - count) };
+}
+
+/**
+ * 記一次呼叫。⚠️ 在**發出請求之前**遞增，不是成功之後 ——
+ * 失敗的請求同樣可能計入 Google 的帳單，低估會讓「尚餘額度」失去意義。
+ * 內部的重試不另計：同工感知的單位是「我送出了一句話」，重試是實作細節。
+ */
+function recordCall() {
+  const usage = readUsage();
+  usage.count += 1;
+  try { localStorage.setItem(USAGE_KEY, JSON.stringify(usage)); } catch (e) {}
+}
+
+function dailyCapError(cap) {
+  const err = new Error(
+    `今日的 AI 呼叫已達上限（${cap} 次）。額度於明日自動重置；` +
+    `若需要更多，可到「系統設定 → Gemini API 金鑰」調整每日上限。`
+  );
+  err.code = "DAILY_CAP_REACHED";
+  return err;
+}
+
 /**
  * 核心方法：發送請求至 Gemini API REST 端點
  */
 async function callGeminiAPI(apiKey, model, systemInstruction, prompt, history = [], responseJson = false, responseSchema = null) {
+  // Usage Guardrail：先檢查再遞增，最後才發請求。
+  // 離線示範模式根本不會走到這裡（呼叫端在無金鑰時另有分支），因此不受影響。
+  const cap = getDailyCap();
+  const { count } = readUsage();
+  if (count >= cap) throw dailyCapError(cap);
+  recordCall();
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   
   // 建立對話格式

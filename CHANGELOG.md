@@ -4,6 +4,154 @@
 
 ---
 
+## [docs-m9-adr] - 2026-09-03 09:53 (香港時間 UTC+8)
+
+## 📐 補寫 Milestone 9 的三份 ADR，並重數表現層量測值
+
+**本次不含任何程式碼變更。** 這是一次留檔補完：Milestone 9 的兩輪提交（`7f03baa`、`787c4e7`）完全沒有動 `adr/` 或 `DECISIONS.md`，而該里程碑做了三個帶有明確被否決方案的重大決策。
+
+時間來源：本機系統時鐘，原始值 `Thu Sep  3 01:53:50 UTC 2026`（`date -u`），系統時區 `Asia/Hong_Kong`，`date` 與 `date -u` 相差正好 8 小時，換算為 **2026-09-03 09:53 HKT**。本專案為 local-first 無後端，無伺服器時間可用。
+
+### 📝 三份補寫的 ADR
+
+*   **[ADR-0009: The Interface Only Admits Persisted Records](adr/0009-interface-only-admits-persisted-records.md)**
+    「先寫入保險箱，成功才收進記憶體」。記錄五個被否決方案，包括「保留原順序但失敗時回滾」（回滾會 fail open，忘了回滾就留下幻影紀錄）與「在各顯示點過濾幻影紀錄」（那是 ADR-0008 §4 已否決的 per-site guard 模式）。特別記下為何不能接受「重載即自我修正」：數字會自我修正，**徽章不會** —— 一個依據不存在紀錄發出的持久徽章，正是 Milestone 7 要消滅的東西。
+
+*   **[ADR-0010: Two-Layer Defence for Untrusted Content](adr/0010-two-layer-defence-for-untrusted-content.md)**
+    渲染層 escape 與匯入白名單**兩者都做**，並記錄兩者不可互相取代的不對稱理由：白名單救不了修正前已存進保險箱的惡意個案，而只做 escape 會讓未知欄位永久留在保險箱等待日後新增的渲染點。六個被否決方案含「標記化模板」（會 escape 掉 94 處 innerHTML 中刻意插入的 HTML）與「在資料入口 escape」（會污染資料，匯出給督導時變成 `&lt;b&gt;`）。
+    **並記下代價兩輪的教訓**：依欄位名 grep 找不到中介變數 —— `historyText` 是兩個不同用途的同名變數，一個進 `innerHTML`、一個組 Markdown 匯出，我因此誤判兩次。可靠的方法是反過來：**先枚舉 `innerHTML` 模板，再看模板內未 escape 的資料插入**。以及「只做一半的 escape 等於沒做」—— `data-text` 的寫入側 escape 了，讀回側沒有，攻擊在拖放時仍然成立。
+
+*   **[ADR-0011: Daily Model-Call Cap and Its Accounting](adr/0011-daily-model-call-cap-accounting.md)**
+    計數放在唯一網路出口、以邏輯呼叫為單位、在請求**之前**遞增、上限可調。七個被否決方案含「成功後才遞增」（低估同工的實際帳單 —— 在別人的信用卡上多報比少報誠實）與「達上限時封鎖進入面談室」（會連帶封鎖已完成工作的逐字紀錄與匯出）。同時記錄兩項已知界線：用量是 per-browser-profile 而非 per-person（PRD 的存取模型沒有帳號可掛），以及 MiniMax TTS 不計入此數（該條款說的是 model calls，若 TTS 要有預算，應另立計數與措辭）。
+
+### 📊 ARCHITECTURE §8 表現層量測重數
+
+原數字量測於 2026-08-29，此後歷經三個里程碑。重數並**補上量測方法**，讓日後的數字可以比對而非重新發明：
+
+| 項目 | 2026-08-29 | 2026-09-03 |
+| :--- | :--- | :--- |
+| 行內 `style="` | 806 | **801** |
+| `class="` | 672 | **739** |
+| `index.css` 類別規則開頭 | 366 | **416** |
+| `[data-theme="light"]` 覆寫 | 42 | **44** |
+| 行內 `var(--…)` 引用 | 566 | **707** |
+| `font-size` 宣告 | 418 | **447** |
+| 相異字級 | 45 | **71** |
+| 0.70–0.85rem 區間 | 219 | **190** |
+| 間距／圓角相異值 | 20／11 | 20／11（不變） |
+
+值得記下的一組矛盾：相異字級**增加**（45→71），而擁擠的 0.70–0.85rem 區間**減少**（219→190）。兩者同因 —— M7–M9 的新元件寫成 CSS 類別並自帶字級，而非塞進既有區間的行內樣式。對可維護性是對的方向，對尺度是錯的方向，正好印證 §8 自己的論點：修這件事需要一次設計系統整理，不是下一個里程碑的善意。
+
+### 🔄 §7 D21 補記進展
+Milestone 9 的 ADR-0009 讓徽章推導的**輸入**變得可信（`state.historySessions` 只含真正寫入保險箱的紀錄，寫入失敗不再據以發徽章），但**儲存位置**仍在 `localStorage`。完整由保險箱推導仍待逐題練習紀錄（D26）。
+
+### 📦 變更檔案
+*   [DECISIONS.md](DECISIONS.md)、[adr/0009](adr/0009-interface-only-admits-persisted-records.md)、[adr/0010](adr/0010-two-layer-defence-for-untrusted-content.md)、[adr/0011](adr/0011-daily-model-call-cap-accounting.md)：新增三份 ADR 與索引。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)：§7 D21 補記；§8 量測值重數並新增量測方法區塊。
+*   本檔：新增本條目。
+
+**未更動**：`PRD.md`（實作未偏離產品意圖，無偏差需記）、`CLAUDE.md`、`Product_Roadmap.md`（M9 狀態已於上一輪更新為 Completed，本輪無範圍或順序變更）、`plan/`、所有程式碼檔案。
+
+---
+
+## [v20260902_v28_m9fix] - 2026-09-02 11:38 (香港時間 UTC+8)
+
+## 🩹 Milestone 9 同儕審查修正 —— 匯入吃掉劇本，以及七處 escape 遺漏
+
+時間來源：本機系統時鐘，原始值 `Wed Sep  2 03:38:21 UTC 2026`（`date -u`），系統時區 `Asia/Hong_Kong`，換算 **2026-09-02 11:38 HKT**。
+
+### 🐛 匯入白名單把個案的離線劇本整段吃掉
+`sanitizeImportedCase()` 處理 `roleplay_flow` 時只找 `x.text`，但真實形狀是 `{ user, ai_reply, coach_hint }` —— **沒有 `text` 欄位**。撰寫計劃時盤點了個案的頂層欄位，卻沒有讀這個陣列的內部結構，於是每一項都被判為無效並丟棄。
+
+實測完整使用者路徑：同工 A 分享阿強的基因碼 → 同工 B 匯入，顯示「🎉 成功導入個案：阿強」→ 保險箱內 `roleplay_flow: []` → B 在離線模式點進去，看到「此個案未附示範劇本…無法在此模式下與他對話」。**3 回合劇本被匯入流程吃掉，而訊息說成功。**
+
+修法：依真實形狀逐欄位清理；`ai_reply` 與 `coach_hint` 皆須為非空字串該回合才算有效（缺督導提示會讓面板空白而不說明原因，違反 PRD「hint visible by default on arrival」）；`user` 欄位程式碼雖未讀取，但屬教材內容，原樣保留。匯入提示改為據實告知丟棄的回合數 —— 原本只數頂層鍵，劇本被丟時 `roleplay_flow` 仍以空陣列存在，同工看不到任何線索。
+
+### 🛡️ 追查時牽出的七處 escape 遺漏
+修好上一項後重跑安全掃蕩，**離線完成畫面觸發了 XSS**。根因：`historyText` 這個變數名在檔案中出現兩次，用途完全不同 —— 一個進 `<pre>` 的 `innerHTML`，一個組 Markdown 匯出。我 grep 時看到 `.map(h => …)` 就認定是匯出，**建置與審查時各誤判一次**。
+
+改用「先枚舉 `innerHTML` 模板、再看模板內未 escape 的資料插入」（而非依欄位名 grep），找出七處：
+
+*   `app.js:5326`／`5331` — 離線完成畫面的逐字回顧與面談日誌
+*   `app.js:5466` — 報告頁的日誌備份
+*   `app.js:6915` — 詳情彈窗的 SOAP 分頁
+*   `app.js:1608` — 隨機盲盒的 `randomCase.name`，來自 `state.cases`，**包含匯入的個案**
+*   **`app.js:5649` — ICF 拖放因子**：Milestone 9 escape 了寫進 `data-text` 屬性的那一側，卻漏了 `getAttribute("data-text")` 讀回來又進 `innerHTML` 的那一側 —— 拖放時攻擊仍然成立。**只做一半的 escape 等於沒做。**
+*   `app.js:7137` — 瀏覽器語音名稱，系統提供而非同工輸入，低風險，一致處理
+
+同一輪掃描確認 18 處 `state.theoryProgress.*` 是布林轉 CSS 變數名（非資料插入），`opt.text`／`ach.name`／`node.name` 來自 `mockData.js`（教材，受信任且可能刻意含格式），皆不需處理。
+
+同工自己輸入的筆記也納入 escape 範圍 —— 貼進標記不應被當成 HTML 解析。
+
+### ✅ 驗證
+七個內建個案的劇本逐一比對，全部完整保留且逐字相符；走完整 UI 路徑匯入阿強 → 3 回合完整 → **離線可對話**，劇本標示與督導提示正確；故意弄壞兩個回合 → 提示明說「2 個回合格式不完整…保留 1 個回合」。以植入保險箱的惡意個案走遍儀表板盲盒、個案大廳、ICF 沙盒（含**實際拖放**）、面談室、劇本回合、完成畫面、歷史卡片、詳情彈窗 SOAP 分頁 —— `window.__XSS` 全程 **0**。正常路徑回歸：面談、報告頁雷達、筆記顯示、AI 總結換行仍生效、保險箱 1 筆、用量計 2 次。Markdown 匯出無 `&lt;`／`&amp;`／`&quot;`。乾淨載入主控台零輸出。
+
+### 📦 變更檔案
+*   [app.js](app.js)：`sanitizeImportedCase()` 的 `roleplay_flow` 依真實形狀清理；匯入提示據實告知；七處 escape 補齊。
+*   [index.html](index.html)：`app.js` 戳記改為 `v20260902_v28_m9fix`；**`index.css` 本輪未改動，戳記維持 `v20260831_v27_m9`**。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)、[Product_Roadmap.md](Product_Roadmap.md)、[plan/09-trustworthy-local-record.md](plan/09-trustworthy-local-record.md)。
+
+**未更動**：`PRD.md`、`CLAUDE.md`、`mockData.js`、`geminiService.js`、`src/utils/db.js`、`index.css`、`DECISIONS.md`、`adr/`。
+
+---
+
+## [v20260831_v27_m9] - 2026-09-02 10:24 (香港時間 UTC+8)
+
+## 🔐 Milestone 9「可信賴的本地紀錄」
+
+時間來源：本機系統時鐘，原始值 `Wed Sep  2 02:24:17 UTC 2026`（`date -u`），系統時區 `Asia/Hong_Kong`，換算 **2026-09-02 10:24 HKT**。
+
+計劃：[`plan/09-trustworthy-local-record.md`](plan/09-trustworthy-local-record.md)（批准 2026-08-31）
+對應 PRD v4：`SSOT`、`Security & Secrets`、`Usage Guardrail`
+
+### 📊 紀錄與畫面永遠對得上（同儕審查的 C1）
+`persistCompletedSession()` 舊版第一行就把面談 `unshift` 進 `state.historySessions` —— **在寫入保險箱之前**，且失敗不回滾。實測後果：保險箱 0 筆而畫面顯示 2 場、儀表板寫「72 分」。
+
+**更嚴重的是徽章**，因為它是持久的：判定同樣讀那個陣列，於是寫入失敗仍發出「初試啼聲」與「同理心大師」；重載後保險箱 0 筆、歷史 0 張，徽章卻仍「已解鎖」，且對帳旗標已寫入不會再跑。
+
+改為**先寫入、成功才收進記憶體**。因為儀表板、分析頁、雷達與徽章判定都經 `computeCounselorRecord()` 讀同一個陣列，一個順序改動同時修好全部 —— 實測寫入失敗後徽章為 `[]`。降級分支連帶改用候選陣列 `[session, ...state.historySessions]`，因為此刻該筆還不在陣列裡。
+
+### 🔑 診斷日誌不再留下金鑰特徵與帳號識別（D8）
+三件事一起做：**不再寫入 `localStorage`**；日誌內容不再含金鑰任何字元片段（改為只記格式與長度）與明文 Group ID（改為只記是否解析成功）；**開機清除舊安裝殘留的 `rehab_minimax_debug_log`**。
+
+實際驅動 `fetchMiniMaxTTSAudio()` 驗證：日誌行為 `🔑 金鑰已提供（JWT 格式，長度 76）`，無 `****` 遮蔽樣式、無金鑰片段、無 Group ID，`localStorage` 為 `null`。
+
+### 📈 每日 AI 呼叫上限（D13）
+計數放在 `callGeminiAPI()` —— 五個匯出函式**唯一**的網路出口，因此沒有任何呼叫路徑會漏算。一次邏輯呼叫計 1（內部 3 次重試不另計，同工感知的單位是「我送出了一句話」）；**在發出請求前遞增**，因為失敗的請求同樣可能計入 Google 帳單。
+
+設定頁在 Gemini 金鑰欄位**旁邊**顯示「已用 N / 上限 M · 尚餘 K 次」與進度條，接近上限轉琥珀。上限預設 200、可調 10–2000 —— PRD 稱其為 per-counselor，在無帳號的單機架構下那只能指「這位同工自己的上限」。離線示範不進入 `callGeminiAPI()`，實測不計數。
+
+### 🛡️ 不受信任的內容不得成為標記（D16／D31）
+**`ARCHITECTURE.md` 對 D31 的記錄稱督導提示面板是「唯一這樣的介面」—— 錯了 48 倍。** 系統掃描找出 48 處：個案欄位 25、ICF 因子 10（含一處**屬性值** `data-text="${f.text}"`）、面談紀錄快照 5、AI 測驗 4、AI 總結 2、逐字對話 1、督導提示 1。
+
+**最危險的一條根本不經過模型**：匯入基因碼只檢查 `id`／`name`／`health_condition` **存在**，就把解碼物件直接寫進 `state.cases` 並永久存入保險箱。攻擊者遞給同工一段 base64，匯入即在其瀏覽器執行任意程式碼 —— 而 Gemini 金鑰就在同一個 `localStorage`。
+
+兩道防線都必要：`escHtml()` 在渲染層（**這才救得了修正前已存進保險箱的惡意個案**），欄位白名單在匯入層（擋未知欄位含 `__proto__`）。
+
+`escHtml()` 連引號一起 escape，因為有一處插入在屬性值位置 —— M8 的 `escapeHtmlText()` 是 DOM-based 且不處理引號，兩者用途已分開註明。實測 escape 後 `dataset.text` 仍讀回原字串，**ICF 拖放判定不受影響**。
+
+Markdown **匯出**路徑刻意不 escape：那是給督導的檔案不是 DOM，實測匯出檔含原樣 `<b>粗體</b>` 而無 `&lt;`。
+
+### ✅ 驗證
+以含 `<img onerror>` 的惡意個案（**植入保險箱**，模擬修正前已匯入）走遍七個渲染位置 —— 個案大廳、小組研討下拉、ICF 理論頁、ICF 沙盒、面談室、完成畫面、歷史卡片、詳情彈窗逐字對話 —— **`window.__XSS` 全程為 0**。AI 產物（`coachHint`、`report.summary`）同樣零觸發且換行仍生效。白名單測試：未知欄位全丟、原型未污染、巢狀陣列已清理。上限對四個函式全部生效且被擋時不遞增。C1 主場景七項檢查全過，重試後無重複，降級模式一致。M5／M6／M7／M8 回歸通過，乾淨載入主控台零輸出。
+
+### ⚠️ 未驗證
+真實 Gemini 金鑰端對端；MiniMax TTS 成功路徑（只驗證 2049 失敗分支的日誌）；連續 STT；ICF 沙盒完整拖放評分；理論 Hub 閃卡與自測；AI 個案合成完整流程；SOAP 助手抽屜；Phase 13 干預注入；真實跨日的用量重置（以偽造 `date` 驗證）。
+
+### 🚧 已知未處理
+每日上限輸入框不跟隨淺色主題。量測確認旁邊的金鑰輸入框行為完全相同（`.form-group input` 特異度較高，兩主題皆深底白字），單獨改這一個反而與鄰居不一致。CSS 中已註明理由；屬 `ARCHITECTURE.md` §8 的設計系統工作。
+
+### 📦 變更檔案
+*   [geminiService.js](geminiService.js)：用量計數層（`getDailyUsage`／`getDailyCap`／`setDailyCap`／`recordCall`）與 `callGeminiAPI()` 的上限檢查。
+*   [app.js](app.js)：`escHtml()`、`sanitizeImportedCase()`、`renderDailyUsagePanel()`、`bindDailyCapInput()`；`persistCompletedSession()` 順序反轉；`writeSessionToVault()` 候選陣列；重試成功後才 unshift；48 處插入點 escape；診斷日誌三項修正；開機清除舊日誌鍵。
+*   [index.css](index.css)：用量面板樣式（含未採用淺色覆寫的理由註記）。
+*   [index.html](index.html)：快取戳記 `v20260831_v27_m9`。
+*   [ARCHITECTURE.md](ARCHITECTURE.md)、[Product_Roadmap.md](Product_Roadmap.md)、[plan/09-trustworthy-local-record.md](plan/09-trustworthy-local-record.md)。
+
+**未更動**：`PRD.md`（本次實作既有條款）、`CLAUDE.md`、`mockData.js`、`src/utils/db.js`、`DECISIONS.md`、`adr/`。
+
+---
+
 ## [v20260831_v26_m8fix] - 2026-08-31 15:23 (香港時間 UTC+8)
 
 ## 🩹 Milestone 8 補完 —— 三項待修全部修正，里程碑完成
