@@ -5,7 +5,7 @@ An offline-capable, local-first Single Page Application for clinical rehabilitat
 
 - **Architecture**: Vanilla ES Modules + CSS3 Glassmorphism. **Zero build step** — the files served are the files in the repo.
 - **AI**: Google Gemini (structured `responseSchema` output via `geminiService.js`); speech via Web Speech API + MiniMax Neural Cantonese TTS.
-- **Repository**: https://github.com/wongsir1011/rehab-counselor-ai (**private**)
+- **Repository**: https://github.com/wongsir1011/rehab-counselor-ai (**public**, verified 2026-10-01)
 - **Deployment**: Vercel, production branch `main` → https://rehab-counselor-ai.vercel.app/
 
 ## ⚠️ Read this before touching anything
@@ -68,8 +68,8 @@ python3 check_syntax.py
 ```
 
 ## Git & deployment workflow
-- **Do not run `git push`.** The user handles all pushes via GitHub Desktop. Commit locally, then hand off.
-- This machine has **no GitHub credentials** — `git fetch` and `git push` fail with `could not read Username`, and the repo is private so anonymous API reads 404. To compare local code against what is live, `curl` the files from the Vercel URL and diff them against `git show <branch>:<file>`. No auth required.
+- **Do not run `git push`.** In the GitHub Desktop workflow the user handles pushes. In an owner-authorized ChatGPT Work maintenance session, authenticated connector operations may create a reviewable work branch and PR; a production-triggering merge needs owner approval.
+- Credential availability is environment-specific. As of 2026-10-01 the repository is public and anonymous cloning works; an authenticated GitHub connector is available in ChatGPT Work. When the owner authorizes remote project maintenance, use a work branch and connector-created PR; do not write product changes directly to `main`. For GitHub Desktop work, retain the local commit/handoff flow. Compare live Vercel assets against the recorded source, and separately verify Production/Current and its commit.
 - **Multiple clones exist on this machine.** `~/Projects/rehab-counselor-ai` is the working one. `~/.gemini/antigravity/scratch/rehab-counselor-ai` and `~/Documents/rehab-counselor-ai` are older clones — GitHub Desktop has pointed at the wrong one before.
 - Commit messages are Conventional Commits with a Traditional Chinese subject, e.g. `feat(vault): 面談歷史與自定義個案遷移至 IndexedDB…`.
 
@@ -82,3 +82,7 @@ python3 check_syntax.py
 
 ---
 *Development moved to Claude Code in August 2026; earlier work (through ADR-0005's authorship) was done with Antigravity. Historical attributions in `adr/` and `CHANGELOG.md` reflect that and are left as written.*
+
+## Project handoff and automated checks (2026-10-01)
+
+See `README.md`, `PROJECT.md` and `docs/ACCEPTANCE.md` for current entry points and verified limits. Run `python3 scripts/check_project.py` alongside the existing syntax gate; the new GitHub Actions `Project checks` mirrors both. Repository housekeeping is separate from product milestones: this documentation/CI pass does not approve or implement Milestone 10, change the PRD, or rewrite historical ADRs.
