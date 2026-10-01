@@ -4,6 +4,14 @@
 
 ---
 
+## [project-standardization] - 2026-10-01（香港時間）
+
+補齊 README、PROJECT 及實機驗收表；核對 main、GitHub Production 部署紀錄及正式域名六個執行資源的內容。新增 GitHub Actions、Node 真正 parser 與正式入口靜態依賴檢查；修正 CLAUDE.md 的私人 repo／環境憑證過時描述，保留 Desktop 工作流程並補上已授權 connector PR 路徑。
+
+原有 Python 語法檢查及 Node／入口檢查通過。沒有修改產品程式、PRD、歷史 ADR、快取版本或授權，沒有建立穩定版本／Release。main 未受保護；真金鑰、粵語、瀏覽器與裝置驗收仍待完成。部署紀錄成功及檔案相同不等於已直接核對 Vercel Current alias。
+
+---
+
 ## [docs-m9-adr] - 2026-09-03 09:53 (香港時間 UTC+8)
 
 ## 📐 補寫 Milestone 9 的三份 ADR，並重數表現層量測值
