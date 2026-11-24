@@ -1,25 +1,20 @@
 # RehabCounselor AI — 項目交接紀錄
 
-核實日期：2026-10-01（香港時間）。這是一份當時快照；最新部署指針由 [中央 Registry](https://github.com/wongsir1011/andrew-project-registry) 維護。
+以下為 2026-11-24（香港時間）的核實快照。[中央 Registry](https://github.com/wongsir1011/andrew-project-registry) 記錄各正式環境的部署來源。
 
 ## 來源、版本與部署
 
 | 項目 | 核實結果 |
 |---|---|
-| Canonical repo | https://github.com/wongsir1011/rehab-counselor-ai |
-| 公開程度 | GitHub connector 顯示 public；舊私人 repo 描述已修正 |
-| 正式分支／盤點來源 | `main` / `08dc73ab7d3d7e91be124d9eed58527545fb5f0a` |
-| 程式快取版本 | `v20260902_v28_m9fix`，來自 HTML 的 app.js 入口與 CHANGELOG；不是已驗收的語意版本 |
-| 最新歷史文件條目 | `docs-m9-adr`（2026-09-03） |
-| 穩定版本／Release | 未宣告；GitHub Releases 為空，未有此次裝置驗收 |
-| 正式網址 | https://rehab-counselor-ai.vercel.app/ |
-| 平台 | Vercel；文件記錄 production branch `main` |
-| 最新 GitHub Production deployment | [6286337139](https://api.github.com/repos/wongsir1011/rehab-counselor-ai/deployments/6286337139)，SHA 與上述 main 相同，status success |
-| 該部署網址 | https://rehab-counselor-jbt51bf3j-wongsir1011s-projects.vercel.app |
-| Vercel commit 狀態 | success：[部署詳情](https://vercel.com/wongsir1011s-projects/rehab-counselor-ai/4CY1q8o8GfdYJbF9pC7SaDFXRfVP) |
-| 正式域名內容 | index.html、app.js、geminiService.js、mockData.js、index.css、src/utils/db.js 已下載，與上述來源逐 byte 相同 |
-| 當前 Production commit | 未直接核實 Current／Active／正式 alias 的平台指向；以上為 GitHub 部署紀錄與正式域名檔案證據，不能證明文件 commit 或 alias 沒有被另行更新 |
-| 次要環境 | 未發現／未核實，不能假設不存在 |
+| Canonical repo | [wongsir1011/rehab-counselor-ai](https://github.com/wongsir1011/rehab-counselor-ai)，公開 repo |
+| 正式分支及來源 | [`main` / `a5801e3d85977a1215e6b672b58f1c1d52148627`](https://github.com/wongsir1011/rehab-counselor-ai/commit/a5801e3d85977a1215e6b672b58f1c1d52148627) |
+| 程式快取標記 | `v20260902_v28_m9fix`（`index.html` 的 `app.js` 入口） |
+| 穩定版本及 Release | 待完整驗收後定版。GitHub 暫無 Release |
+| 正式網址 | [rehab-counselor-ai.vercel.app](https://rehab-counselor-ai.vercel.app/) |
+| Vercel 正式部署 | 2026-11-24 直接核實 `Ready / Latest / Production / Current`。正式域名指向上述 `main` commit。[Vercel 部署詳情](https://vercel.com/wongsir1011s-projects/rehab-counselor-ai/DLHgudayakqY4pYpHL2tHEJzWKRC) |
+| GitHub 部署紀錄 | `success`，來源與上述 `main` 相同。[Production deployment 6777580081](https://api.github.com/repos/wongsir1011/rehab-counselor-ai/deployments/6777580081/statuses) |
+| 正式域名內容 | `index.html`、`index.css`、`app.js`、`geminiService.js`、`mockData.js`、`src/utils/db.js` 逐 byte 與上述來源相同 |
+| 其他環境 | GitHub Pages 未啟用。Vercel 的 `git-main` 及部署專用網址屬同一部署。其他正式環境尚未識別 |
 
 ## 功能與真實依賴
 
@@ -29,21 +24,19 @@
 - `src/` 除 db.js 外的舊模組未被目前入口載入。本次保留，不能把修改它們當作已修改正式產品。
 - IndexedDB 保存面談和自訂個案；小設定及密鑰在 localStorage。備份排除密鑰；AI／TTS 請求直接由瀏覽器傳至供應商。
 
-## 本輪整理與檢查
+## 整理與驗收
 
-| 步驟 | 狀態與證據 | 下一步／負責者 |
+| 步驟 | 狀態與證據 | 下一步及負責者 |
 |---|---|---|
-| 來源盤點 | 完成；上述 main、部署及檔案比對 | 合併後維護者重查正式環境 |
-| 交接文件 | README、PROJECT、驗收表及本輪 CHANGELOG 已整理，隨 PR 審核 | 擁有人審閱 |
-| 本地語法 | 原有 check_syntax.py 與 Node parser／靜態資源依賴檢查通過 | CI 重跑 |
-| CI | 新增 GitHub Actions `Project checks`；main 原先沒有 Actions runs | PR 上核對實際結果 |
-| 瀏覽器自動驗證 | 本環境缺 Chromium；下載失敗，未執行瀏覽器 smoke test | 實機或可用瀏覽器重驗 |
-| 實機／真 key | 待驗收；[驗收表](docs/ACCEPTANCE.md) | Andrew 桌面及手機實測 |
-| 授權 | 無 LICENSE；本輪未改授權，亦未因其他 repo 的決定推定本 repo 授權 | 擁有人決定是否需要授權標示 |
-| main 治理 | GitHub branches 顯示 protected=false；rulesets=[]。新增 CI 不等於強制分支保護 | 維護者設定 PR／必需檢查／禁強推及刪除後核實 |
-| 舊分支 | chore/docs-links、docs/ssot-governance-audit、feature/adr-0005-vault 已為 main 祖先且無開放 PR；rollback 不是已合併分支 | 保留，未確定仍否有本地工作前不刪 |
-| Release／下載 | 不適用：目前為網頁服務，沒有原生安裝包 | 不為整理製造空 Release |
-| 中央登記 | Registry 已定位；以 Testing、未驗收版本及明確部署限制登記 | 合併後更新 source commit 與正式證據 |
+| 基礎整理 | [PR #15](https://github.com/wongsir1011/rehab-counselor-ai/pull/15) 已合併，加入交接文件、驗收表和 CI | 維護者合併文件更新後重查正式部署 |
+| 本地檢查 | 2026-11-24 兩項檢查通過。Node 成功解析 22 個 JavaScript 檔，5 個本地入口資源及依賴均存在 | 維護者在 PR 上核對 CI |
+| GitHub Actions | [`main` 的 Project checks](https://github.com/wongsir1011/rehab-counselor-ai/actions/runs/36823975316) 通過，執行來源為上述 commit | 維護者維持必要檢查 |
+| 正式站瀏覽器驗證 | 免金鑰「阿強」個案完成三回合，顯示示範回覆及督導提示，完成面談後可重新載入及查閱「離線示範・未評估」紀錄。全量備份按鈕成功產生下載。[驗收表](docs/ACCEPTANCE.md) | Andrew 在桌面／手機驗收真實 Gemini、粵語及還原，並完成其餘項目 |
+| 授權 | 公開 repo 現無 `LICENSE` | 由擁有人決定發放授權 |
+| `main` 治理 | GitHub 確認受保護，`Project checks` 適用於所有人。既有規則記錄要求 PR、分支須更新至最新 `main`，並禁止強制推送及刪除。[分支保護設定](https://github.com/wongsir1011/rehab-counselor-ai/settings/branch_protection_rules/84033630) | 維護者沿用現行規則 |
+| 舊分支 | 已核對三條分支為 `main` 祖先，上一輪整理分支經 squash 合併且檔案樹與快照一致。刪除前須確定無人使用。另有 `rollback` 分支需要保留其未併入的歷史 | 維護者確認分支用途 |
+| 下載 | 網頁服務。使用者可匯出面談日誌及備份 | 安裝包發佈流程不適用 |
+| 中央登記 | [中央 Registry](https://github.com/wongsir1011/andrew-project-registry) 已登記為 Testing，快照的 repo 及正式部署來源與登記一致 | 維護者合併文件更新後同步來源及驗收證據 |
 
 ## 尚未交付的產品範圍
 
